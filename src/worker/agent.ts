@@ -1,36 +1,76 @@
-import type { Env, ChatMessage, ToolCall, AgentEvent } from './types'
+import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
 import { chatCompletionStream } from './llm'
 import { getToolDefinitions, executeTool } from './tools'
-import { buildPreamble } from './preamble'
-import { BOOTSTRAP_PROMPT } from './identity'
+import { OPERATING_NOTES } from './identity'
+import { buildListsPreamble } from './lists'
+import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
+import { renderStreamContext, type Pair } from './stream-pyramid'
 
-const MAX_TOOL_ROUNDS = 15
+const MAX_TOOL_ROUNDS = 12
 
 interface AgentContext {
   env: Env
   conversationId: string
 }
 
-export async function* runAgent(
-  ctx: AgentContext,
-  userMessage: string
-): AsyncGenerator<AgentEvent> {
+// ---- Shared context assembly ----
+async function buildSystemPrompt(env: Env): Promise<string> {
+  const parts = [OPERATING_NOTES]
+  const doc = (await getSystemDoc(env)) || DEFAULT_SYSTEM_DOC
+  if (doc) parts.push(`# Your system\n${doc}`)
+  const lists = await buildListsPreamble(env) // instructions + memory-instructions (load_mode = always)
+  if (lists) parts.push(lists)
+  return parts.join('\n\n')
+}
+
+const dateLine = (ts: string | null): string => (ts ? ts.slice(0, 10) : '')
+
+// The stream pyramid spliced as prior turns - Angel's own memory, first person.
+function recapTurns(tiles: StreamSummaryRow[]): ChatMessage[] {
+  if (tiles.length === 0) return []
+  const recap = tiles.map(t => t.text).join('\n\n')
+  return [
+    { role: 'user', content: `(picking up where we left off - my memory of earlier)\n\n${recap}` },
+    { role: 'assistant', content: "Right - that's where we've been." },
+  ]
+}
+
+// Verbatim tail as real prior turns, each marked with date + thread topic.
+function verbatimTurns(pairs: Pair[]): ChatMessage[] {
+  const msgs: ChatMessage[] = []
+  for (const p of pairs) {
+    const marker = `[${dateLine(p.userTs)}${p.topic ? ` · ${p.topic}` : ''}]`
+    msgs.push({ role: 'user', content: `${marker} ${p.userContent}` })
+    if (p.assistantContent) msgs.push({ role: 'assistant', content: p.assistantContent })
+  }
+  return msgs
+}
+
+// ---- Response pass (hot path, streaming) ----
+export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGenerator<AgentEvent> {
   const { env, conversationId } = ctx
 
-  const systemPrompt = await buildSystemPrompt(env, conversationId)
-  const history = await loadHistory(env, conversationId)
-  const preamble = await buildPreamble(env, conversationId, userMessage)
+  const system = await buildSystemPrompt(env)
+  const { tiles, verbatim, total } = await renderStreamContext(env)
+  // The current message is already saved; drop it from the verbatim tail and append it live.
+  const history = verbatim.filter(p => p.idx !== total - 1)
 
-  const userContent = preamble
-    ? `${preamble}\n\n${userMessage}`
-    : userMessage
+  const conv = await env.DB.prepare(
+    `SELECT topic, (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) AS c
+     FROM conversations c WHERE id = ?`
+  ).bind(conversationId).first<{ topic: string | null; c: number }>()
+  const topic = conv?.topic || null
+  const isNewThread = (conv?.c ?? 0) <= 1
+  const marker = `[${dateLine(new Date().toISOString())}${topic ? ` · ${topic}` : ''}]`
+  const freshNote = isNewThread
+    ? " (Eli just opened a fresh thread - you have the whole history, but don't drag the last topic in unless it's relevant.)"
+    : ''
 
-  // DO already saved the raw user message to D1.
-  // loadHistory includes it - slice it off and re-add with preamble.
   const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt },
-    ...history.slice(0, -1),
-    { role: 'user', content: userContent },
+    { role: 'system', content: system },
+    ...recapTurns(tiles),
+    ...verbatimTurns(history),
+    { role: 'user', content: `${marker} ${userMessage}${freshNote}` },
   ]
 
   const tools = getToolDefinitions()
@@ -40,222 +80,72 @@ export async function* runAgent(
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     let assistantText = ''
     const toolCalls: ToolCall[] = []
-    const toolCallArgs: Map<number, string> = new Map()
+    const toolCallArgs = new Map<number, string>()
 
     for await (const chunk of chatCompletionStream(env, messages, { tools })) {
       const choice = chunk.choices[0]
       if (!choice) continue
-
       if (choice.delta.content) {
         assistantText += choice.delta.content
         yield { type: 'text', content: choice.delta.content }
       }
-
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
           if (tc.id) {
-            toolCalls[tc.index] = {
-              id: tc.id,
-              type: 'function',
-              function: { name: tc.function?.name || '', arguments: '' },
-            }
+            toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
           }
-          if (tc.function?.name && toolCalls[tc.index]) {
-            toolCalls[tc.index].function.name = tc.function.name
-          }
-          if (tc.function?.arguments) {
-            const prev = toolCallArgs.get(tc.index) || ''
-            toolCallArgs.set(tc.index, prev + tc.function.arguments)
-          }
+          if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
+          if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
         }
       }
-
-      if (chunk.usage) {
-        totalInput += chunk.usage.prompt_tokens
-        totalOutput += chunk.usage.completion_tokens
-      }
+      if (chunk.usage) { totalInput += chunk.usage.prompt_tokens; totalOutput += chunk.usage.completion_tokens }
     }
 
-    for (const [index, args] of toolCallArgs) {
-      if (toolCalls[index]) {
-        toolCalls[index].function.arguments = args
-      }
-    }
+    for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
+    const valid = toolCalls.filter(Boolean)
 
-    const validToolCalls = toolCalls.filter(Boolean)
-
-    if (validToolCalls.length === 0) {
+    if (valid.length === 0) {
       await saveMessage(env, conversationId, 'assistant', assistantText, undefined, totalInput, totalOutput)
       yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
       return
     }
 
-    // Save assistant message with tool calls
-    messages.push({
-      role: 'assistant',
-      content: assistantText || null,
-      tool_calls: validToolCalls,
-    })
-
-    // Execute tools and add results
-    for (const tc of validToolCalls) {
+    messages.push({ role: 'assistant', content: assistantText || null, tool_calls: valid })
+    for (const tc of valid) {
       let args: Record<string, unknown>
-      try {
-        args = JSON.parse(tc.function.arguments)
-      } catch {
-        args = {}
-      }
-
+      try { args = JSON.parse(tc.function.arguments) } catch { args = {} }
       yield { type: 'tool_start', id: tc.id, name: tc.function.name, label: toolLabel(tc.function.name, args) }
-
       let result: string
-      try {
-        result = await executeTool(env, conversationId, tc.function.name, args)
-      } catch (e) {
-        result = `Error: ${e instanceof Error ? e.message : String(e)}`
-      }
-
+      try { result = await executeTool(env, conversationId, tc.function.name, args) }
+      catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       yield { type: 'tool_result', id: tc.id, result }
-
-      messages.push({
-        role: 'tool',
-        content: result,
-        tool_call_id: tc.id,
-      })
+      messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
   }
 
-  // If we exhausted tool rounds
   yield { type: 'error', message: 'Reached maximum tool call rounds' }
   yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
 }
 
-function toolLabel(name: string, args: Record<string, unknown>): string {
-  const trunc = (s: unknown, max: number) => {
-    const str = String(s || '')
-    return str.length > max ? str.slice(0, max) + '…' : str
-  }
-  switch (name) {
-    case 'record_observation': return `Noting: ${trunc(args.content, 60)}`
-    case 'recall': return `Searching memory for "${trunc(args.query, 40)}"`
-    case 'create_model': return `Creating model "${args.name}"`
-    case 'update_model_description': return `Updating model "${args.name}"`
-    case 'memory_load_model': return `Loading model "${args.name}"`
-    case 'memory_stats': return 'Checking memory stats'
-    case 'catchup': return 'Loading recent context'
-    case 'glopus_models': return 'Browsing Glopus models'
-    case 'glopus_load': return `Loading Glopus model "${args.name}"`
-    case 'lists_catalog': return 'Checking lists'
-    case 'list_create': return `Creating list "${args.name}"`
-    case 'list_read': return `Reading list "${args.name}"`
-    case 'list_add': return `Adding to "${args.name}"`
-    case 'list_supersede': return 'Updating list item'
-    case 'list_archive': return 'Archiving list item'
-    default: return name
-  }
-}
-
-async function buildSystemPrompt(env: Env, conversationId: string): Promise<string> {
-  const parts: string[] = [BOOTSTRAP_PROMPT]
-
-  // Load instructions list if it exists
-  const instrList = await env.DB.prepare(
-    `SELECT id FROM lists WHERE name = 'instructions'`
-  ).first<{ id: string }>()
-  if (instrList) {
-    const items = await env.DB.prepare(
-      `SELECT content FROM list_items WHERE list_id = ? AND superseded_by IS NULL AND archived = 0 ORDER BY COALESCE(ordinal, id)`
-    ).bind(instrList.id).all<{ content: string }>()
-    if (items.results.length > 0) {
-      parts.push('# Instructions\n' + items.results.map(i => i.content).join('\n\n'))
-    }
-  }
-
-  // Load self model portrait if it exists
-  const self = await env.DB.prepare(
-    `SELECT portrait FROM models WHERE name = 'self'`
-  ).first<{ portrait: string | null }>()
-  if (self?.portrait) {
-    parts.push(`# Self\n${self.portrait}`)
-  }
-
-  // Load recent model portrait if it exists
-  const recent = await env.DB.prepare(
-    `SELECT portrait FROM models WHERE name = 'recent'`
-  ).first<{ portrait: string | null }>()
-  if (recent?.portrait) {
-    parts.push(`# Recent context\n${recent.portrait}`)
-  }
-
-  return parts.join('\n\n')
-}
-
-async function loadHistory(env: Env, conversationId: string): Promise<ChatMessage[]> {
-  const rows = await env.DB.prepare(
-    `SELECT role, content, tool_calls, tool_call_id FROM messages
-     WHERE conversation_id = ? ORDER BY id ASC LIMIT 200`
-  ).bind(conversationId).all<{ role: string; content: string; tool_calls: string | null; tool_call_id: string | null }>()
-
-  return rows.results.map(row => {
-    const msg: ChatMessage = {
-      role: row.role as ChatMessage['role'],
-      content: row.content,
-    }
-    if (row.tool_calls) {
-      try { msg.tool_calls = JSON.parse(row.tool_calls) } catch {}
-    }
-    if (row.tool_call_id) {
-      msg.tool_call_id = row.tool_call_id
-    }
-    return msg
-  })
-}
-
-async function saveMessage(
-  env: Env,
-  conversationId: string,
-  role: string,
-  content: string,
-  toolCalls?: ToolCall[],
-  usageInput?: number,
-  usageOutput?: number
-): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO messages (conversation_id, role, content, tool_calls, usage_input, usage_output)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(
-    conversationId,
-    role,
-    content,
-    toolCalls ? JSON.stringify(toolCalls) : null,
-    usageInput ?? null,
-    usageOutput ?? null,
-  ).run()
-
-  await env.DB.prepare(
-    `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
-  ).bind(conversationId).run()
-}
-
-// Headless agent run for cron jobs (no streaming)
-export async function runHeadlessAgent(
-  env: Env,
-  conversationId: string,
-  systemPromptOverride: string,
-  userMessage: string
-): Promise<string> {
+// ---- Memory pass (off hot path): the same Angel, full context, deciding what to keep ----
+export async function runMemoryPass(env: Env, conversationId: string): Promise<void> {
+  const system = await buildSystemPrompt(env)
+  const { tiles, verbatim } = await renderStreamContext(env) // includes the just-finished exchange
   const messages: ChatMessage[] = [
-    { role: 'system', content: systemPromptOverride },
-    { role: 'user', content: userMessage },
+    { role: 'system', content: system },
+    ...recapTurns(tiles),
+    ...verbatimTurns(verbatim),
+    {
+      role: 'user',
+      content: "(memory) Instead of replying, look back at the latest exchange. If anything there is worth remembering, record it with record_observation - in your own voice, tagged, following your memory-instructions. If nothing is, do nothing. Do not address Eli here.",
+    },
   ]
 
   const tools = getToolDefinitions()
-  let fullResponse = ''
-
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < 4; round++) {
     let text = ''
     const toolCalls: ToolCall[] = []
-    const toolCallArgs: Map<number, string> = new Map()
+    const toolCallArgs = new Map<number, string>()
 
     for await (const chunk of chatCompletionStream(env, messages, { tools })) {
       const choice = chunk.choices[0]
@@ -263,48 +153,54 @@ export async function runHeadlessAgent(
       if (choice.delta.content) text += choice.delta.content
       if (choice.delta.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
-          if (tc.id) {
-            toolCalls[tc.index] = {
-              id: tc.id,
-              type: 'function',
-              function: { name: tc.function?.name || '', arguments: '' },
-            }
-          }
-          if (tc.function?.name && toolCalls[tc.index]) {
-            toolCalls[tc.index].function.name = tc.function.name
-          }
-          if (tc.function?.arguments) {
-            const prev = toolCallArgs.get(tc.index) || ''
-            toolCallArgs.set(tc.index, prev + tc.function.arguments)
-          }
+          if (tc.id) toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
+          if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
+          if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
         }
       }
     }
-
-    for (const [index, args] of toolCallArgs) {
-      if (toolCalls[index]) toolCalls[index].function.arguments = args
-    }
-
+    for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
     const valid = toolCalls.filter(Boolean)
-    fullResponse += text
-
-    if (valid.length === 0) break
+    if (valid.length === 0) return
 
     messages.push({ role: 'assistant', content: text || null, tool_calls: valid })
-
     for (const tc of valid) {
       let args: Record<string, unknown>
       try { args = JSON.parse(tc.function.arguments) } catch { args = {} }
       let result: string
-      try {
-        result = await executeTool(env, conversationId, tc.function.name, args)
-      } catch (e) {
-        result = `Error: ${e instanceof Error ? e.message : String(e)}`
-      }
+      try { result = await executeTool(env, conversationId, tc.function.name, args) }
+      catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
   }
+}
 
-  await saveMessage(env, conversationId, 'assistant', fullResponse)
-  return fullResponse
+function toolLabel(name: string, args: Record<string, unknown>): string {
+  const trunc = (s: unknown, max: number) => { const str = String(s || ''); return str.length > max ? str.slice(0, max) + '…' : str }
+  switch (name) {
+    case 'record_observation': return `Noting: ${trunc(args.content, 60)}`
+    case 'recall': return `Recalling "${trunc(args.query, 40)}"`
+    case 'create_tag': return `New tag "${args.name}"`
+    case 'update_tag_description': return `Updating tag "${args.name}"`
+    case 'list_tags': return 'Reviewing tags'
+    case 'memory_stats': return 'Checking memory'
+    case 'lists_catalog': return 'Checking lists'
+    case 'list_create': return `Creating list "${args.name}"`
+    case 'list_read': return `Reading "${args.name}"`
+    case 'list_add': return `Adding to "${args.name}"`
+    case 'list_supersede': return 'Updating a list item'
+    case 'list_archive': return 'Archiving a list item'
+    default: return name
+  }
+}
+
+async function saveMessage(
+  env: Env, conversationId: string, role: string, content: string,
+  toolCalls?: ToolCall[], usageInput?: number, usageOutput?: number
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO messages (conversation_id, role, content, tool_calls, usage_input, usage_output)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(conversationId, role, content, toolCalls ? JSON.stringify(toolCalls) : null, usageInput ?? null, usageOutput ?? null).run()
+  await env.DB.prepare(`UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`).bind(conversationId).run()
 }

@@ -89,6 +89,17 @@
     applyDarkMode(darkMode);
   }
 
+  function relativeTime(ts: string): string {
+    const diff = Date.now() - new Date(ts).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'now';
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d`;
+  }
+
   $: needsAuth = connState === 'disconnected' && !localStorage.getItem('pin');
   $: authFailed = connState === 'disconnected' && !!localStorage.getItem('pin');
 </script>
@@ -122,7 +133,10 @@
             class:active={currentChatId === conv.id}
             on:click={() => selectConversation(conv.id)}
           >
-            <span class="conv-title">{conv.title || 'New conversation'}</span>
+            <div class="conv-info">
+              <span class="conv-title">{conv.title || 'New conversation'}</span>
+              <span class="conv-time">{relativeTime(conv.updated_at)}</span>
+            </div>
             <button
               class="archive-btn"
               on:click|stopPropagation={() => archiveConversation(conv.id)}
@@ -246,7 +260,8 @@
     padding: 10px 12px;
     background: none;
     border: none;
-    border-radius: 8px;
+    border-left: 2px solid transparent;
+    border-radius: 0 8px 8px 0;
     cursor: pointer;
     text-align: left;
     display: flex;
@@ -257,13 +272,28 @@
     margin-bottom: 2px;
   }
   .conv-item:hover { background: var(--bg-hover); }
-  .conv-item.active { background: var(--bg-active); }
+  .conv-item.active {
+    background: var(--bg-active);
+    border-left-color: var(--accent);
+  }
+
+  .conv-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
 
   .conv-title {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
+  }
+
+  .conv-time {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
   }
 
   .archive-btn {

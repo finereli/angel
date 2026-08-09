@@ -13,6 +13,7 @@ export interface Env {
 export interface ConversationRow {
   id: string
   title: string | null
+  topic: string | null
   created_at: string
   updated_at: string
   archived: number
@@ -31,11 +32,10 @@ export interface MessageRow {
   usage_output: number | null
 }
 
-export interface ModelRow {
+export interface TagRow {
   id: string
   name: string
   description: string | null
-  portrait: string | null
   observation_count: number
   created_at: string
   updated_at: string
@@ -46,6 +46,29 @@ export interface ObservationRow {
   content: string
   source: string
   conversation_id: string | null
+  created_at: string
+}
+
+export interface ObservationSummaryRow {
+  id: number
+  tag_id: string
+  tier: number
+  text: string
+  source_count: number
+  start_ts: string | null
+  end_ts: string | null
+  created_at: string
+}
+
+export interface StreamSummaryRow {
+  id: number
+  tier: number
+  start_index: number
+  end_index: number
+  start_ts: string | null
+  end_ts: string | null
+  text: string
+  source_count: number
   created_at: string
 }
 
@@ -72,32 +95,6 @@ export interface ListItemRow {
   ordinal: number | null
   superseded_by: number | null
   archived: number
-  created_at: string
-}
-
-export interface SummaryRow {
-  id: number
-  model_id: string
-  tier: number
-  content: string
-  created_at: string
-}
-
-export interface GlopusModelRow {
-  id: string
-  name: string
-  description: string | null
-  portrait: string | null
-  observation_count: number
-  imported_at: string
-}
-
-export interface ShortTermRow {
-  id: number
-  tier: number
-  content: string
-  pair_start: number
-  pair_end: number
   created_at: string
 }
 
@@ -170,7 +167,7 @@ export type ServerMsg =
   | { type: 'conv:created'; conversationId: string }
   | { type: 'conv:archived'; conversationId: string }
   | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot }
-  | { type: 'conv:title'; conversationId: string; title: string }
+  | { type: 'conv:title'; conversationId: string; title: string; topic: string | null }
   | { type: 'msg:user'; conversationId: string; clientMsgId: string; messageId: number; content: string }
   | { type: 'text'; conversationId: string; seq: number; content: string }
   | { type: 'tool_start'; conversationId: string; seq: number; id: string; name: string; label: string }

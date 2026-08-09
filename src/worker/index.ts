@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import type { Env } from './types'
-import { handleScheduled } from './cron'
 
 export { AngelDO } from './durable-object'
 
@@ -19,7 +18,4 @@ app.get('/api/health', (c) => c.json({ ok: true, name: 'Angel' }))
 
 export default {
   fetch: app.fetch,
-  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(handleScheduled(env, controller.cron))
-  },
 }

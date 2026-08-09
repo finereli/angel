@@ -1,63 +1,26 @@
 import type { Env, ToolDefinition } from './types'
 import {
-  addObservation, createModel, updateModelDescription, getModel,
-  getAllModels, recall, getGlopusModels, getGlopusModel
+  addObservation, createTag, updateTagDescription, getAllTags, recall, getMemoryStats,
 } from './memory'
 import {
   getLists, getList, getListItems, addListItem,
-  supersedeListItem, archiveListItem, createList
+  supersedeListItem, archiveListItem, createList,
 } from './lists'
-import { renderShortTermPyramid } from './short-term'
 
 export function getToolDefinitions(): ToolDefinition[] {
   return [
-    // Memory tools
     {
       type: 'function',
       function: {
         name: 'record_observation',
-        description: 'Record something worth remembering across sessions. Write in your own voice - what mattered, what shifted, specific facts. Tag with one or more model names. Pyramid is for narrative and insight, not records or lists - if you would update a row rather than append a thought, use a list instead.',
+        description: 'Keep something worth remembering across time, in your own voice - what mattered, what shifted, specifics. Tag it. Tags are yours to name; new ones are created automatically. Use lists instead for structured records you would update a row of rather than append a thought to.',
         parameters: {
           type: 'object',
           properties: {
             content: { type: 'string', description: 'The observation to record' },
-            models: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Model names to tag this observation to',
-            },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Tag names to file this under' },
           },
-          required: ['content', 'models'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'create_model',
-        description: 'Create a new memory model when a genuinely new person, project, or topic emerges that deserves its own cluster.',
-        parameters: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', description: 'Short kebab-case name' },
-            description: { type: 'string', description: 'What this model tracks' },
-          },
-          required: ['name', 'description'],
-        },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'update_model_description',
-        description: 'Update the description of an existing memory model.',
-        parameters: {
-          type: 'object',
-          properties: {
-            name: { type: 'string' },
-            description: { type: 'string' },
-          },
-          required: ['name', 'description'],
+          required: ['content', 'tags'],
         },
       },
     },
@@ -65,7 +28,7 @@ export function getToolDefinitions(): ToolDefinition[] {
       type: 'function',
       function: {
         name: 'recall',
-        description: 'Search memory for specific facts. Use to verify names, dates, numbers, quotes before stating them. Returns raw observation fragments.',
+        description: 'Search your memory. Returns matching observations (specific notes) and summaries (broader integrations, each labeled with how many observations back it). If a summary is close but you need specifics, search again more narrowly.',
         parameters: {
           type: 'object',
           properties: {
@@ -79,62 +42,52 @@ export function getToolDefinitions(): ToolDefinition[] {
     {
       type: 'function',
       function: {
-        name: 'memory_load_model',
-        description: 'Load a specific memory model by name. Use when the automatic router missed a relevant model, or when you want to explore a topic the catalog lists.',
+        name: 'create_tag',
+        description: 'Create a tag with a description. Optional - tags are also created automatically when you first use them. Use this to give a tag a clear description.',
         parameters: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'Model name from the catalog' },
+            name: { type: 'string', description: 'Short kebab-case name' },
+            description: { type: 'string', description: 'What this tag is about' },
           },
-          required: ['name'],
+          required: ['name', 'description'],
         },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'update_tag_description',
+        description: 'Update a tag\'s description.',
+        parameters: {
+          type: 'object',
+          properties: { name: { type: 'string' }, description: { type: 'string' } },
+          required: ['name', 'description'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'list_tags',
+        description: 'List your tags with their descriptions and observation counts.',
+        parameters: { type: 'object', properties: {} },
       },
     },
     {
       type: 'function',
       function: {
         name: 'memory_stats',
-        description: 'Get memory system statistics - model count, observation count, summary count.',
+        description: 'Counts: tags, observations, summaries.',
         parameters: { type: 'object', properties: {} },
       },
     },
-    {
-      type: 'function',
-      function: {
-        name: 'catchup',
-        description: 'Pull the short-term cross-conversation pyramid for continuity context.',
-        parameters: { type: 'object', properties: {} },
-      },
-    },
-    // Glopus reference memory
-    {
-      type: 'function',
-      function: {
-        name: 'glopus_models',
-        description: 'List all available Glopus (predecessor) memory models. Glopus is the companion agent that came before you - his accumulated knowledge is available as reference.',
-        parameters: { type: 'object', properties: {} },
-      },
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'glopus_load',
-        description: 'Load a specific Glopus model portrait. Use to access your predecessor\'s accumulated knowledge about a person, project, or topic.',
-        parameters: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', description: 'Glopus model name' },
-          },
-          required: ['name'],
-        },
-      },
-    },
-    // List tools
+    // Lists
     {
       type: 'function',
       function: {
         name: 'lists_catalog',
-        description: 'List all available lists with their load modes and item counts.',
+        description: 'List all lists with their load modes and item counts.',
         parameters: { type: 'object', properties: {} },
       },
     },
@@ -142,7 +95,7 @@ export function getToolDefinitions(): ToolDefinition[] {
       type: 'function',
       function: {
         name: 'list_create',
-        description: 'Create a new list for structured records, procedures, or rules.',
+        description: 'Create a list for structured records, rules, or procedures.',
         parameters: {
           type: 'object',
           properties: {
@@ -150,8 +103,8 @@ export function getToolDefinitions(): ToolDefinition[] {
             description: { type: 'string' },
             load_mode: {
               type: 'string',
-              enum: ['always', 'per-message', 'on-demand', 'search-only'],
-              description: 'When to inject: always (every turn), per-message (as reminder), on-demand (agent loads explicitly), search-only (vector search only)',
+              enum: ['always', 'on-demand'],
+              description: 'always = injected every turn; on-demand = you load it explicitly',
             },
           },
           required: ['name', 'description', 'load_mode'],
@@ -165,9 +118,7 @@ export function getToolDefinitions(): ToolDefinition[] {
         description: 'Read all active items in a list.',
         parameters: {
           type: 'object',
-          properties: {
-            name: { type: 'string', description: 'List name' },
-          },
+          properties: { name: { type: 'string' } },
           required: ['name'],
         },
       },
@@ -180,9 +131,9 @@ export function getToolDefinitions(): ToolDefinition[] {
         parameters: {
           type: 'object',
           properties: {
-            name: { type: 'string', description: 'List name' },
+            name: { type: 'string' },
             content: { type: 'string' },
-            ordinal: { type: 'number', description: 'Position number for ordered lists' },
+            ordinal: { type: 'number', description: 'Position for ordered lists' },
           },
           required: ['name', 'content'],
         },
@@ -192,13 +143,10 @@ export function getToolDefinitions(): ToolDefinition[] {
       type: 'function',
       function: {
         name: 'list_supersede',
-        description: 'Replace a list item with an updated version. Preserves history.',
+        description: 'Replace a list item with an updated version, preserving history.',
         parameters: {
           type: 'object',
-          properties: {
-            item_id: { type: 'number', description: 'ID of the item to replace' },
-            content: { type: 'string', description: 'New content' },
-          },
+          properties: { item_id: { type: 'number' }, content: { type: 'string' } },
           required: ['item_id', 'content'],
         },
       },
@@ -210,9 +158,7 @@ export function getToolDefinitions(): ToolDefinition[] {
         description: 'Archive a list item (soft delete).',
         parameters: {
           type: 'object',
-          properties: {
-            item_id: { type: 'number', description: 'ID of the item to archive' },
-          },
+          properties: { item_id: { type: 'number' } },
           required: ['item_id'],
         },
       },
@@ -221,99 +167,61 @@ export function getToolDefinitions(): ToolDefinition[] {
 }
 
 export async function executeTool(
-  env: Env,
-  conversationId: string,
-  name: string,
-  args: Record<string, unknown>
+  env: Env, conversationId: string, name: string, args: Record<string, unknown>
 ): Promise<string> {
   switch (name) {
-    // Memory
     case 'record_observation': {
-      const id = await addObservation(
-        env,
-        args.content as string,
-        args.models as string[],
-        'agent',
-        conversationId
-      )
-      return `Observation ${id} recorded.`
-    }
-    case 'create_model': {
-      const id = await createModel(env, args.name as string, args.description as string)
-      return `Model "${args.name}" created (${id}).`
-    }
-    case 'update_model_description': {
-      await updateModelDescription(env, args.name as string, args.description as string)
-      return `Model "${args.name}" description updated.`
+      const id = await addObservation(env, args.content as string, (args.tags as string[]) || [], 'agent', conversationId)
+      return `Recorded (${id}).`
     }
     case 'recall': {
-      const results = await recall(env, args.query as string, (args.limit as number) || 8)
-      if (results.length === 0) return 'No matching observations found.'
-      return results.map(r =>
-        `[${r.created_at}] (score: ${r.score.toFixed(3)}) ${r.content}`
-      ).join('\n\n')
+      const hits = await recall(env, args.query as string, (args.limit as number) || 8)
+      if (hits.length === 0) return 'Nothing found.'
+      return hits.map(h => `[${h.label}] ${h.text}`).join('\n\n')
     }
-    case 'memory_load_model': {
-      const model = await getModel(env, args.name as string)
-      if (!model) return `Model "${args.name}" not found.`
-      if (!model.portrait) return `Model "${args.name}" exists but has no portrait yet (${model.observation_count} observations).`
-      return `# ${model.name}\n${model.description || ''}\n\n${model.portrait}`
+    case 'create_tag': {
+      await createTag(env, args.name as string, args.description as string)
+      return `Tag "${args.name}" ready.`
+    }
+    case 'update_tag_description': {
+      await updateTagDescription(env, args.name as string, args.description as string)
+      return `Tag "${args.name}" updated.`
+    }
+    case 'list_tags': {
+      const tags = await getAllTags(env)
+      if (tags.length === 0) return 'No tags yet.'
+      return tags.map(t => `- ${t.name} (${t.observation_count}): ${t.description || ''}`).join('\n')
     }
     case 'memory_stats': {
-      const { getMemoryStats } = await import('./memory')
-      const stats = await getMemoryStats(env)
-      return `Models: ${stats.models}\nObservations: ${stats.observations}\nSummaries: ${stats.summaries}`
+      const s = await getMemoryStats(env)
+      return `Tags: ${s.tags}\nObservations: ${s.observations}\nSummaries: ${s.summaries}`
     }
-    case 'catchup': {
-      const pyramid = await renderShortTermPyramid(env)
-      return pyramid || 'No short-term context available yet.'
-    }
-
-    // Glopus reference
-    case 'glopus_models': {
-      const models = await getGlopusModels(env)
-      if (models.length === 0) return 'No Glopus models imported yet.'
-      return models.map(m =>
-        `- ${m.name} (${m.observation_count} obs): ${m.description || ''}`
-      ).join('\n')
-    }
-    case 'glopus_load': {
-      const model = await getGlopusModel(env, args.name as string)
-      if (!model) return `Glopus model "${args.name}" not found.`
-      if (!model.portrait) return `Glopus model "${args.name}" has no portrait.`
-      return `# Glopus: ${model.name}\n${model.description || ''}\n\n${model.portrait}`
-    }
-
-    // Lists
     case 'lists_catalog': {
       const lists = await getLists(env)
-      if (lists.length === 0) return 'No lists exist yet.'
-      const items: string[] = []
-      for (const list of lists) {
-        const listItems = await getListItems(env, list.id)
-        items.push(`- ${list.name} [${list.load_mode}] (${listItems.length} items): ${list.description || ''}`)
+      if (lists.length === 0) return 'No lists yet.'
+      const out: string[] = []
+      for (const l of lists) {
+        const items = await getListItems(env, l.id)
+        out.push(`- ${l.name} [${l.load_mode}] (${items.length}): ${l.description || ''}`)
       }
-      return items.join('\n')
+      return out.join('\n')
     }
     case 'list_create': {
-      const id = await createList(env, args.name as string, args.description as string, args.load_mode as string)
-      return `List "${args.name}" created (${id}).`
+      await createList(env, args.name as string, args.description as string, args.load_mode as string)
+      return `List "${args.name}" created.`
     }
     case 'list_read': {
       const list = await getList(env, args.name as string)
       if (!list) return `List "${args.name}" not found.`
       const items = await getListItems(env, list.id)
       if (items.length === 0) return `List "${args.name}" is empty.`
-      return items.map(item => {
-        const prefix = item.ordinal != null ? `${item.ordinal}. ` : ''
-        return `[${item.id}] ${prefix}${item.content}`
-      }).join('\n')
+      return items.map(i => `[${i.id}] ${i.ordinal != null ? `${i.ordinal}. ` : ''}${i.content}`).join('\n')
     }
     case 'list_add': {
       const list = await getList(env, args.name as string)
       if (!list) return `List "${args.name}" not found.`
       const id = await addListItem(env, list.id, args.content as string, args.ordinal as number | undefined)
-      return `Item ${id} added to "${args.name}".`
+      return `Added (${id}) to "${args.name}".`
     }
     case 'list_supersede': {
       const newId = await supersedeListItem(env, args.item_id as number, args.content as string)
@@ -323,7 +231,6 @@ export async function executeTool(
       await archiveListItem(env, args.item_id as number)
       return `Item ${args.item_id} archived.`
     }
-
     default:
       return `Unknown tool: ${name}`
   }

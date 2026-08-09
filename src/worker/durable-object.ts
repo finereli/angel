@@ -2,10 +2,10 @@ import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
   ConversationRow, MessageRow, AgentEvent
 } from './types'
-import { runAgent, runHeadlessAgent } from './agent'
+import { runAgent, runMemoryPass } from './agent'
 import { generateTitle } from './title'
-import { buildShortTermSummaries } from './short-term'
-import { ensureRecentModel } from './memory'
+import { buildObservationPyramid } from './memory'
+import { buildStreamPyramid } from './stream-pyramid'
 
 interface ActiveStream {
   conversationId: string
@@ -23,6 +23,8 @@ export class AngelDO implements DurableObject {
   private state: DurableObjectState
   private env: Env
   private activeStreams = new Map<string, ActiveStream>()
+  // Serializes background memory work: a fast follow-up waits for the prior rollup.
+  private memoryChain: Promise<void> = Promise.resolve()
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -184,7 +186,6 @@ export class AngelDO implements DurableObject {
   }
 
   private async handleChat(conversationId: string, clientMsgId: string, content: string) {
-    // Only one stream per conversation
     if (this.activeStreams.has(conversationId)) {
       this.broadcast({
         type: 'error',
@@ -195,26 +196,6 @@ export class AngelDO implements DurableObject {
       return
     }
 
-    await ensureRecentModel(this.env)
-
-    // Save user message
-    const result = await this.env.DB.prepare(
-      `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
-    ).bind(conversationId, content).run()
-
-    await this.env.DB.prepare(
-      `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
-    ).bind(conversationId).run()
-
-    this.broadcast({
-      type: 'msg:user',
-      conversationId,
-      clientMsgId,
-      messageId: result.meta.last_row_id,
-      content,
-    })
-
-    // Start agent stream
     const stream: ActiveStream = {
       conversationId,
       seq: 0,
@@ -222,9 +203,29 @@ export class AngelDO implements DurableObject {
       tools: [],
       aborted: false,
     }
-    this.activeStreams.set(conversationId, stream)
 
     try {
+      // Wait for any in-flight memory rollup so context renders from a settled state.
+      await this.memoryChain.catch(() => {})
+
+      const result = await this.env.DB.prepare(
+        `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
+      ).bind(conversationId, content).run()
+
+      await this.env.DB.prepare(
+        `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
+      ).bind(conversationId).run()
+
+      this.broadcast({
+        type: 'msg:user',
+        conversationId,
+        clientMsgId,
+        messageId: result.meta.last_row_id,
+        content,
+      })
+
+      this.activeStreams.set(conversationId, stream)
+
       for await (const event of runAgent({ env: this.env, conversationId }, content)) {
         if (stream.aborted) break
 
@@ -286,19 +287,26 @@ export class AngelDO implements DurableObject {
         }
       }
     } catch (e) {
+      const errMsg = e instanceof Error ? e.message : 'Agent error'
       stream.seq++
       this.broadcast({
         type: 'error',
         conversationId,
         seq: stream.seq,
-        message: e instanceof Error ? e.message : 'Agent error',
+        message: errMsg,
       })
+      // Save error as assistant message so it persists across reconnects
+      await this.env.DB.prepare(
+        `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`
+      ).bind(conversationId, `*Error: ${errMsg}*`).run().catch(() => {})
     } finally {
       this.activeStreams.delete(conversationId)
     }
 
-    // Background work: title generation, short-term summaries
-    this.state.waitUntil(this.postStreamWork(conversationId, content, stream.text))
+    this.memoryChain = this.memoryChain
+      .then(() => this.postStreamWork(conversationId, content, stream.text))
+      .catch(() => {})
+    this.state.waitUntil(this.memoryChain)
   }
 
   private handleStop(conversationId: string) {
@@ -308,7 +316,7 @@ export class AngelDO implements DurableObject {
 
   private async postStreamWork(conversationId: string, userMessage: string, assistantText: string) {
     try {
-      // Generate title if this is the first exchange
+      // Name the thread from its first exchange (title doubles as the topic marker).
       const msgCount = await this.env.DB.prepare(
         `SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?`
       ).bind(conversationId).first<{ c: number }>()
@@ -316,12 +324,15 @@ export class AngelDO implements DurableObject {
       if (msgCount && msgCount.c <= 3) {
         const title = await generateTitle(this.env, userMessage, assistantText)
         await this.env.DB.prepare(
-          `UPDATE conversations SET title = ? WHERE id = ?`
-        ).bind(title, conversationId).run()
-        this.broadcast({ type: 'conv:title', conversationId, title })
+          `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
+        ).bind(title, title, conversationId).run()
+        this.broadcast({ type: 'conv:title', conversationId, title, topic: title })
       }
 
-      await buildShortTermSummaries(this.env)
+      // The same Angel, in parallel, decides what to remember. Then roll up both pyramids.
+      await runMemoryPass(this.env, conversationId)
+      await buildObservationPyramid(this.env)
+      await buildStreamPyramid(this.env)
     } catch {
       // background failures are non-fatal
     }

@@ -1,267 +1,213 @@
-import type { Env, ModelRow, ObservationRow, SummaryRow, GlopusModelRow } from './types'
+// The observation layer: tags, observations, a per-tag summary pyramid, and
+// RAG over both observations and summaries. See docs/pyramid-spec.md §2.
+import type { Env, TagRow, ObservationRow, ObservationSummaryRow } from './types'
+import { OBS } from './config'
+import { chatCompletion } from './llm'
 
-export async function addObservation(
-  env: Env,
-  content: string,
-  modelNames: string[],
-  source: string = 'agent',
-  conversationId?: string
-): Promise<number> {
-  const result = await env.DB.prepare(
-    `INSERT INTO observations (content, source, conversation_id) VALUES (?, ?, ?)`
-  ).bind(content, source, conversationId ?? null).run()
-
-  const obsId = result.meta.last_row_id
-
-  for (const name of modelNames) {
-    const model = await env.DB.prepare(
-      `SELECT id FROM models WHERE name = ?`
-    ).bind(name).first<{ id: string }>()
-
-    if (model) {
-      await env.DB.prepare(
-        `INSERT OR IGNORE INTO observation_tags (observation_id, model_id) VALUES (?, ?)`
-      ).bind(obsId, model.id).run()
-
-      await env.DB.prepare(
-        `UPDATE models SET observation_count = observation_count + 1, updated_at = datetime('now') WHERE id = ?`
-      ).bind(model.id).run()
-    }
-  }
-
-  // Embed in background
-  await embedObservation(env, obsId, content)
-
-  return obsId
-}
-
-export async function createModel(
-  env: Env,
-  name: string,
-  description: string
-): Promise<string> {
+// ---- Tags ----
+export async function createTag(env: Env, name: string, description: string): Promise<string> {
+  const existing = await getTag(env, name)
+  if (existing) return existing.id
   const id = crypto.randomUUID()
   await env.DB.prepare(
-    `INSERT INTO models (id, name, description) VALUES (?, ?, ?)`
+    `INSERT INTO tags (id, name, description) VALUES (?, ?, ?)`
   ).bind(id, name, description).run()
   return id
 }
 
-export async function updateModelDescription(
-  env: Env,
-  name: string,
-  description: string
-): Promise<void> {
+export async function getTag(env: Env, name: string): Promise<TagRow | null> {
+  return env.DB.prepare(`SELECT * FROM tags WHERE name = ?`).bind(name).first<TagRow>()
+}
+
+export async function getAllTags(env: Env): Promise<TagRow[]> {
+  return (await env.DB.prepare(`SELECT * FROM tags ORDER BY updated_at DESC`).all<TagRow>()).results
+}
+
+export async function updateTagDescription(env: Env, name: string, description: string): Promise<void> {
   await env.DB.prepare(
-    `UPDATE models SET description = ?, updated_at = datetime('now') WHERE name = ?`
+    `UPDATE tags SET description = ?, updated_at = datetime('now') WHERE name = ?`
   ).bind(description, name).run()
 }
 
-export async function getModel(env: Env, name: string): Promise<ModelRow | null> {
-  return env.DB.prepare(
-    `SELECT * FROM models WHERE name = ?`
-  ).bind(name).first<ModelRow>()
-}
-
-export async function getAllModels(env: Env): Promise<ModelRow[]> {
-  const result = await env.DB.prepare(
-    `SELECT * FROM models ORDER BY updated_at DESC`
-  ).all<ModelRow>()
-  return result.results
-}
-
-export async function getObservationsForModel(
-  env: Env,
-  modelId: string,
-  limit: number = 100
-): Promise<ObservationRow[]> {
-  const result = await env.DB.prepare(
-    `SELECT o.* FROM observations o
-     JOIN observation_tags ot ON o.id = ot.observation_id
-     WHERE ot.model_id = ?
-     ORDER BY o.created_at DESC LIMIT ?`
-  ).bind(modelId, limit).all<ObservationRow>()
-  return result.results
-}
-
-export async function getUnsummarizedObservations(
-  env: Env,
-  modelId: string
-): Promise<ObservationRow[]> {
-  const result = await env.DB.prepare(
-    `SELECT o.* FROM observations o
-     JOIN observation_tags ot ON o.id = ot.observation_id
-     LEFT JOIN summary_sources ss ON ss.source_type = 'observation' AND ss.source_id = o.id
-     WHERE ot.model_id = ? AND ss.summary_id IS NULL
-     ORDER BY o.created_at ASC`
-  ).bind(modelId).all<ObservationRow>()
-  return result.results
-}
-
-export async function saveSummary(
-  env: Env,
-  modelId: string,
-  tier: number,
-  content: string,
-  sourceType: string,
-  sourceIds: number[]
+// ---- Observations ----
+export async function addObservation(
+  env: Env, content: string, tagNames: string[], source: string, conversationId?: string
 ): Promise<number> {
   const result = await env.DB.prepare(
-    `INSERT INTO summaries (model_id, tier, content) VALUES (?, ?, ?)`
-  ).bind(modelId, tier, content).run()
+    `INSERT INTO observations (content, source, conversation_id) VALUES (?, ?, ?)`
+  ).bind(content, source, conversationId ?? null).run()
+  const obsId = result.meta.last_row_id as number
 
-  const summaryId = result.meta.last_row_id
-
-  for (const sourceId of sourceIds) {
+  for (const name of tagNames) {
+    // Auto-create missing tags so an observation is never lost.
+    const tagId = await createTag(env, name, '')
     await env.DB.prepare(
-      `INSERT INTO summary_sources (summary_id, source_type, source_id) VALUES (?, ?, ?)`
-    ).bind(summaryId, sourceType, sourceId).run()
+      `INSERT OR IGNORE INTO observation_tags (observation_id, tag_id) VALUES (?, ?)`
+    ).bind(obsId, tagId).run()
+    await env.DB.prepare(
+      `UPDATE tags SET observation_count = observation_count + 1, updated_at = datetime('now') WHERE id = ?`
+    ).bind(tagId).run()
   }
 
-  return summaryId
+  await embed(env, 'observation', obsId, content)
+  return obsId
 }
 
-export async function getSummariesForModel(
-  env: Env,
-  modelId: string,
-  tier?: number
-): Promise<SummaryRow[]> {
-  if (tier !== undefined) {
-    const result = await env.DB.prepare(
-      `SELECT * FROM summaries WHERE model_id = ? AND tier = ? ORDER BY created_at DESC`
-    ).bind(modelId, tier).all<SummaryRow>()
-    return result.results
+// ---- Per-tag observation summary pyramid (greedy, provenance-tracked) ----
+export async function buildObservationPyramid(env: Env): Promise<void> {
+  const tags = await getAllTags(env)
+  for (const tag of tags) {
+    await rollupTag(env, tag.id, tag.name)
   }
-  const result = await env.DB.prepare(
-    `SELECT * FROM summaries WHERE model_id = ? ORDER BY tier ASC, created_at DESC`
-  ).bind(modelId).all<SummaryRow>()
-  return result.results
 }
 
-export async function updatePortrait(
-  env: Env,
-  modelId: string,
-  portrait: string
+async function rollupTag(env: Env, tagId: string, tagName: string): Promise<void> {
+  // Tier 0: batch unsummarized observations
+  let unsummarized = await getUnsummarizedObservations(env, tagId)
+  while (unsummarized.length >= OBS.OBS_BATCH) {
+    const batch = unsummarized.slice(0, OBS.OBS_BATCH)
+    await createObsSummary(env, tagId, 0, tagName,
+      batch.map(o => ({ type: 'observation' as const, id: o.id, text: o.content, ts: o.created_at, count: 1 })))
+    unsummarized = unsummarized.slice(OBS.OBS_BATCH)
+  }
+
+  // Higher tiers: batch unsummarized tier-t summaries into tier-(t+1)
+  for (let tier = 0; tier < 8; tier++) {
+    let pending = await getUnsummarizedSummaries(env, tagId, tier)
+    if (pending.length < OBS.SUM_BATCH) break
+    while (pending.length >= OBS.SUM_BATCH) {
+      const batch = pending.slice(0, OBS.SUM_BATCH)
+      await createObsSummary(env, tagId, tier + 1, tagName,
+        batch.map(s => ({ type: 'summary' as const, id: s.id, text: s.text, ts: s.end_ts || s.created_at, count: s.source_count })))
+      pending = pending.slice(OBS.SUM_BATCH)
+    }
+  }
+}
+
+async function getUnsummarizedObservations(env: Env, tagId: string): Promise<ObservationRow[]> {
+  return (await env.DB.prepare(
+    `SELECT o.* FROM observations o
+     JOIN observation_tags ot ON ot.observation_id = o.id
+     LEFT JOIN summary_sources ss ON ss.source_type = 'observation' AND ss.source_id = o.id
+     WHERE ot.tag_id = ? AND ss.summary_id IS NULL
+     ORDER BY o.created_at ASC, o.id ASC`
+  ).bind(tagId).all<ObservationRow>()).results
+}
+
+async function getUnsummarizedSummaries(env: Env, tagId: string, tier: number): Promise<ObservationSummaryRow[]> {
+  return (await env.DB.prepare(
+    `SELECT s.* FROM observation_summaries s
+     LEFT JOIN summary_sources ss ON ss.source_type = 'summary' AND ss.source_id = s.id
+     WHERE s.tag_id = ? AND s.tier = ? AND ss.summary_id IS NULL
+     ORDER BY s.created_at ASC, s.id ASC`
+  ).bind(tagId, tier).all<ObservationSummaryRow>()).results
+}
+
+async function createObsSummary(
+  env: Env, tagId: string, tier: number, tagName: string,
+  sources: Array<{ type: 'observation' | 'summary'; id: number; text: string; ts: string; count: number }>
 ): Promise<void> {
-  await env.DB.prepare(
-    `UPDATE models SET portrait = ?, updated_at = datetime('now') WHERE id = ?`
-  ).bind(portrait, modelId).run()
-}
+  const body = sources.map(s => s.text).join('\n\n')
+  const text = await compressObs(env, body, tier, tagName)
+  const sourceCount = sources.reduce((n, s) => n + s.count, 0)  // true observations beneath this tile
+  const res = await env.DB.prepare(
+    `INSERT INTO observation_summaries (tag_id, tier, text, source_count, start_ts, end_ts)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(tagId, tier, text, sourceCount, sources[0].ts, sources[sources.length - 1].ts).run()
+  const summaryId = res.meta.last_row_id as number
 
-export async function getMemoryStats(env: Env): Promise<{
-  models: number
-  observations: number
-  summaries: number
-}> {
-  const [models, observations, summaries] = await env.DB.batch([
-    env.DB.prepare(`SELECT COUNT(*) as c FROM models`),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM observations`),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM summaries`),
-  ])
-  return {
-    models: (models.results[0] as { c: number }).c,
-    observations: (observations.results[0] as { c: number }).c,
-    summaries: (summaries.results[0] as { c: number }).c,
-  }
-}
-
-// Glopus reference memory
-export async function getGlopusModels(env: Env): Promise<GlopusModelRow[]> {
-  const result = await env.DB.prepare(
-    `SELECT * FROM glopus_models ORDER BY observation_count DESC`
-  ).all<GlopusModelRow>()
-  return result.results
-}
-
-export async function getGlopusModel(env: Env, name: string): Promise<GlopusModelRow | null> {
-  return env.DB.prepare(
-    `SELECT * FROM glopus_models WHERE name = ?`
-  ).bind(name).first<GlopusModelRow>()
-}
-
-// Embedding helpers
-async function embedObservation(env: Env, obsId: number, content: string): Promise<void> {
-  try {
-    const embedding = await generateEmbedding(env, content)
+  for (const s of sources) {
     await env.DB.prepare(
-      `INSERT OR REPLACE INTO embeddings (source_type, source_id, vector) VALUES ('observation', ?, ?)`
-    ).bind(obsId, JSON.stringify(embedding)).run()
+      `INSERT OR IGNORE INTO summary_sources (summary_id, source_type, source_id) VALUES (?, ?, ?)`
+    ).bind(summaryId, s.type, s.id).run()
+  }
+  await embed(env, 'obs_summary', summaryId, text)
+}
+
+async function compressObs(env: Env, body: string, tier: number, tagName: string): Promise<string> {
+  const system = `You are Angel, compressing your own memory about "${tagName}" into a tier-${tier} note.
+Keep specifics (names, dates, numbers), causal turns, and the texture that matters. Drop redundancy and generic filler.
+Write in your own voice - this is your memory, not a report. First person is fine.`
+  const result = await chatCompletion(env, [
+    { role: 'system', content: system },
+    { role: 'user', content: body },
+  ], { temperature: 0.3, max_tokens: 1024 })
+  return result.content || ''
+}
+
+// ---- Embeddings + RAG ----
+export async function embed(env: Env, sourceType: string, sourceId: number, text: string): Promise<void> {
+  try {
+    const vec = await generateEmbedding(env, text)
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO embeddings (source_type, source_id, vector) VALUES (?, ?, ?)`
+    ).bind(sourceType, sourceId, JSON.stringify(vec)).run()
   } catch {
     // embedding failures are non-fatal
   }
 }
 
 export async function generateEmbedding(env: Env, text: string): Promise<number[]> {
-  const result = await env.AI.run('@cf/baai/bge-base-en-v1.5', {
-    text: [text],
-  }) as { data: number[][] }
-  return result.data[0]
+  const result = await env.AI.run('@cf/baai/bge-base-en-v1.5', { text: [text] }) as { data: number[][] }
+  return result.data[0] || []
 }
 
-export function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0, normA = 0, normB = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
-  }
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB))
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0, na = 0, nb = 0
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb))
 }
 
-export async function searchMemory(
-  env: Env,
-  query: string,
-  limit: number = 10,
-  sourceType?: string
-): Promise<Array<{ source_type: string; source_id: number; score: number }>> {
+export interface RecallHit {
+  kind: 'observation' | 'summary'
+  text: string
+  label: string   // e.g. "tag · tier-2 · 37 obs" or a date
+  score: number
+}
+
+// Search observations AND per-tag summaries; label each by level and backing count.
+export async function recall(env: Env, query: string, limit = 8): Promise<RecallHit[]> {
   const queryVec = await generateEmbedding(env, query)
+  const rows = (await env.DB.prepare(
+    `SELECT source_type, source_id, vector FROM embeddings`
+  ).all<{ source_type: string; source_id: number; vector: string }>()).results
 
-  const sql = sourceType
-    ? `SELECT source_type, source_id, vector FROM embeddings WHERE source_type = ?`
-    : `SELECT source_type, source_id, vector FROM embeddings`
+  const scored = rows.map(r => ({
+    source_type: r.source_type,
+    source_id: r.source_id,
+    score: cosineSimilarity(queryVec, JSON.parse(r.vector)),
+  })).sort((a, b) => b.score - a.score).slice(0, limit)
 
-  const stmt = sourceType ? env.DB.prepare(sql).bind(sourceType) : env.DB.prepare(sql)
-  const result = await stmt.all<{ source_type: string; source_id: number; vector: string }>()
-
-  const scored = result.results.map(row => ({
-    source_type: row.source_type,
-    source_id: row.source_id,
-    score: cosineSimilarity(queryVec, JSON.parse(row.vector)),
-  }))
-
-  scored.sort((a, b) => b.score - a.score)
-  return scored.slice(0, limit)
+  const hits: RecallHit[] = []
+  for (const m of scored) {
+    if (m.source_type === 'observation') {
+      const o = await env.DB.prepare(
+        `SELECT content, created_at FROM observations WHERE id = ?`
+      ).bind(m.source_id).first<{ content: string; created_at: string }>()
+      if (o) hits.push({ kind: 'observation', text: o.content, label: o.created_at.slice(0, 10), score: m.score })
+    } else if (m.source_type === 'obs_summary') {
+      const s = await env.DB.prepare(
+        `SELECT s.text, s.tier, s.source_count, t.name as tag
+         FROM observation_summaries s JOIN tags t ON t.id = s.tag_id WHERE s.id = ?`
+      ).bind(m.source_id).first<{ text: string; tier: number; source_count: number; tag: string }>()
+      if (s) hits.push({
+        kind: 'summary', text: s.text,
+        label: `${s.tag} · tier-${s.tier} · ${s.source_count} obs`, score: m.score,
+      })
+    }
+  }
+  return hits.sort((a, b) => b.score - a.score)
 }
 
-export async function recall(
-  env: Env,
-  query: string,
-  limit: number = 8
-): Promise<Array<{ content: string; source: string; created_at: string; score: number }>> {
-  const matches = await searchMemory(env, query, limit, 'observation')
-
-  if (matches.length === 0) return []
-
-  const ids = matches.map(m => m.source_id)
-  const scoreMap = new Map(matches.map(m => [m.source_id, m.score]))
-
-  const placeholders = ids.map(() => '?').join(',')
-  const result = await env.DB.prepare(
-    `SELECT id, content, source, created_at FROM observations WHERE id IN (${placeholders})`
-  ).bind(...ids).all<ObservationRow>()
-
-  return result.results.map(row => ({
-    content: row.content,
-    source: row.source,
-    created_at: row.created_at,
-    score: scoreMap.get(row.id) || 0,
-  })).sort((a, b) => b.score - a.score)
-}
-
-// Ensure the "recent" model exists
-export async function ensureRecentModel(env: Env): Promise<void> {
-  const existing = await getModel(env, 'recent')
-  if (!existing) {
-    await createModel(env, 'recent', 'Rolling window of recent activity across all models')
+export async function getMemoryStats(env: Env): Promise<{ tags: number; observations: number; summaries: number }> {
+  const [tags, obs, sums] = await env.DB.batch([
+    env.DB.prepare(`SELECT COUNT(*) as c FROM tags`),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM observations`),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM observation_summaries`),
+  ])
+  return {
+    tags: (tags.results[0] as { c: number }).c,
+    observations: (obs.results[0] as { c: number }).c,
+    summaries: (sums.results[0] as { c: number }).c,
   }
 }

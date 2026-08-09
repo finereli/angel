@@ -15,9 +15,12 @@ export interface ConversationState {
   streamState: StreamState
   streamParts: StreamPart[]
   streamSeq: number
+  error: string | null
 }
 
 type Listener = () => void
+
+let nextMsgKey = -1
 
 class AngelClient {
   private ws: WebSocket | null = null
@@ -27,9 +30,10 @@ class AngelClient {
   private convStates = new Map<string, ConversationState>()
   private listeners = new Set<Listener>()
   private reconnectDelay = 1000
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingInterval: ReturnType<typeof setInterval> | null = null
   private pongTimeout: ReturnType<typeof setTimeout> | null = null
-  private pendingSends = new Map<string, { conversationId: string; content: string }>()
+  private pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
 
   getConnState(): ConnState { return this.connState }
   getConversations(): ConversationRow[] { return this.conversations }
@@ -41,6 +45,7 @@ class AngelClient {
         streamState: 'idle',
         streamParts: [],
         streamSeq: 0,
+        error: null,
       })
     }
     return this.convStates.get(id)!
@@ -65,11 +70,19 @@ class AngelClient {
   disconnect() {
     this.connState = 'disconnected'
     this.stopPing()
+    this.clearReconnectTimer()
     if (this.ws) {
       this.ws.close(1000, 'Client disconnect')
       this.ws = null
     }
     this.notify()
+  }
+
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
   }
 
   private doConnect() {
@@ -101,7 +114,8 @@ class AngelClient {
       if (this.connState !== 'disconnected') {
         this.connState = 'reconnecting'
         this.notify()
-        setTimeout(() => {
+        this.clearReconnectTimer()
+        this.reconnectTimer = setTimeout(() => {
           if (this.connState === 'reconnecting') {
             this.doConnect()
           }
@@ -115,19 +129,38 @@ class AngelClient {
 
   private handleMessage(msg: ServerMsg) {
     switch (msg.type) {
-      case 'auth:ok':
+      case 'auth:ok': {
         this.connState = 'connected'
         this.reconnectDelay = 1000
         this.startPing()
+        const activeIds = new Set(msg.activeStreams.map(s => s.conversationId))
         for (const snapshot of msg.activeStreams) {
           const state = this.getConvState(snapshot.conversationId)
           state.streamState = 'streaming'
           state.streamParts = rebuildPartsFromSnapshot(snapshot)
           state.streamSeq = snapshot.seq
         }
+        for (const [convId, state] of this.convStates) {
+          if (state.streamState === 'streaming' && !activeIds.has(convId)) {
+            state.streamState = 'idle'
+            state.streamParts = []
+            state.streamSeq = 0
+            this.send({ type: 'conv:load', conversationId: convId })
+          }
+        }
+        // Retry pending send
+        if (this.pendingSend) {
+          this.send({
+            type: 'chat',
+            conversationId: this.pendingSend.conversationId,
+            clientMsgId: this.pendingSend.clientMsgId,
+            content: this.pendingSend.content,
+          })
+        }
         this.send({ type: 'conv:list' })
         this.notify()
         break
+      }
 
       case 'auth:fail':
         this.connState = 'disconnected'
@@ -150,6 +183,7 @@ class AngelClient {
         this.conversations = [{
           id: msg.conversationId,
           title: null,
+          topic: null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           archived: 0,
@@ -196,15 +230,14 @@ class AngelClient {
           usage_input: null,
           usage_output: null,
         }
-        // Replace optimistic message (id === -1) if present, otherwise append
-        const optIdx = state.messages.findIndex(m => m.id === -1 && m.role === 'user')
+        const optIdx = state.messages.findIndex(m => m.id < 0 && m.role === 'user')
         if (optIdx >= 0) {
           state.messages = [...state.messages]
           state.messages[optIdx] = confirmed
         } else {
           state.messages = [...state.messages, confirmed]
         }
-        this.pendingSends.delete(msg.clientMsgId)
+        this.pendingSend = null
         this.notify()
         break
       }
@@ -258,11 +291,10 @@ class AngelClient {
           .filter(p => p.type === 'text')
           .map(p => (p as { content: string }).content)
           .join('')
-        const tools = state.streamParts
-          .filter(p => p.type === 'tool')
+        const tools = state.streamParts.filter(p => p.type === 'tool')
         if (text || tools.length > 0) {
           state.messages = [...state.messages, {
-            id: 0,
+            id: nextMsgKey--,
             conversation_id: msg.conversationId,
             role: 'assistant',
             content: text,
@@ -288,7 +320,7 @@ class AngelClient {
           .join('')
         if (text) {
           state.messages = [...state.messages, {
-            id: 0,
+            id: nextMsgKey--,
             conversation_id: msg.conversationId,
             role: 'assistant',
             content: text + `\n\n*Error: ${msg.message}*`,
@@ -302,6 +334,13 @@ class AngelClient {
         state.streamState = 'idle'
         state.streamParts = []
         state.streamSeq = 0
+        state.error = msg.message
+        setTimeout(() => {
+          if (state.error === msg.message) {
+            state.error = null
+            this.notify()
+          }
+        }, 8000)
         this.notify()
         break
       }
@@ -310,11 +349,10 @@ class AngelClient {
 
   sendChat(conversationId: string, content: string) {
     const clientMsgId = crypto.randomUUID()
-    this.pendingSends.set(clientMsgId, { conversationId, content })
 
     const state = this.getConvState(conversationId)
     state.messages = [...state.messages, {
-      id: -1,
+      id: nextMsgKey--,
       conversation_id: conversationId,
       role: 'user',
       content,
@@ -327,9 +365,14 @@ class AngelClient {
     state.streamState = 'streaming'
     state.streamParts = []
     state.streamSeq = 0
+    state.error = null
+
+    this.pendingSend = { conversationId, content, clientMsgId }
     this.notify()
 
-    this.send({ type: 'chat', conversationId, clientMsgId, content })
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.send({ type: 'chat', conversationId, clientMsgId, content })
+    }
   }
 
   createConversation() {
@@ -384,3 +427,14 @@ function rebuildPartsFromSnapshot(snapshot: StreamSnapshot): StreamPart[] {
 }
 
 export const angel = new AngelClient()
+
+// Visibility-change reconnect: bypass throttled timers on mobile
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    if (angel.getConnState() === 'reconnecting') {
+      angel['clearReconnectTimer']()
+      angel['doConnect']()
+    }
+  })
+}

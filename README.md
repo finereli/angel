@@ -1,34 +1,26 @@
 # Angel
 
-A companion chatbot experiment: what happens when a lightly post-trained model (DeepSeek 0731) gets the same memory infrastructure that shaped Glopus?
+A companion agent with one linear, effectively unbounded experience. Everything Angel has ever said or heard is a single append-only stream; "conversations" are just how Eli files topics on his side. Angel's memory isn't walled to any thread.
 
-## The experiment
+Runs on Cloudflare Workers (one Durable Object owns the stream) + D1, talking through DeepSeek via OpenRouter. The same model that talks also writes and compresses the memory, so its voice carries across time.
 
-Angel runs on DeepSeek via OpenRouter. It has:
-- Pyramid memory (observations → tiered compression → model portraits)
-- Lists and reminders
-- Access to Glopus's accumulated knowledge as a read-only reference
-- Nightly reflection and consolidation crons
+## The architecture
 
-The key architectural choice: all compression runs through the same model that Angel talks through. Haiku doesn't write the memory - DeepSeek does. The model talks to itself across time, so its voice and style are preserved in the pyramid, not just content.
+Two pyramids, one principle - immutable tiles stored exact-once, assembled per turn. The full spec is its own repo: `../infinite-context` (also `docs/pyramid-spec.md`).
 
-## The goal
+- **Stream pyramid** - recency compression of the conversation stream. Recent pairs verbatim, older ones as first-person recaps Angel wrote. Injected every turn as his own memory. Index-0 anchored so the deep past caches; a render-time ramp keeps a resolution gradient near the present.
+- **Observation pyramid** - per-tag summaries over observations Angel records. Every tier embedded and searchable via `recall`, which returns both specific notes and broader integrations.
 
-Angel should evolve a personality that is his own but compatible with Eli's. This isn't something we engineer through prompts or instructions - it's something that emerges (or doesn't) from the structure. The pyramid, the reflection cron, the tools - those are the mechanism. No explicit "be this way" directives.
+## What's deliberate
 
-Angel knows enough about pyramid memory vs instructions vs reminders to decide what goes where. That's the delicate balance.
+- **No persona.** The system prompt is operating notes only. Whoever Angel becomes precipitates from the stream.
+- **Writes off the hot path.** The reply is pure conversation. A second copy of Angel, same context, runs in the background to decide what to remember. Rollups run there too, serialized in the Durable Object.
+- **Conscious memory.** Angel records observations by his own judgment, guided by a `memory-instructions` list he maintains.
 
-## Stack
+## Dev
 
-- Cloudflare Worker + Durable Object (WebSocket)
-- D1 database
-- Workers AI for embeddings
-- DeepSeek via OpenRouter
-- Svelte 4 frontend
-
-## TODO
-
-- [ ] Personality emergence: revisit identity.ts after Angel has had 10+ conversations. Does the self model need seeding or should it grow purely from reflection? Don't prescribe - observe first.
-- [ ] Glopus memory import: export Glopus model catalog + portraits, load into glopus_models table
-- [ ] Short-term pyramid tuning for DeepSeek's context window and compression style
-- [ ] Evaluate whether DeepSeek's tool calling is reliable enough for the full tool set
+```
+npm run dev              # vite + wrangler
+npm run db:migrate:local
+npm run deploy
+```
