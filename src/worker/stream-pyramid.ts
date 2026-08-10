@@ -69,10 +69,15 @@ export async function getPairsInRange(env: Env, startIdx: number, endIdx: number
 }
 
 // ---- Build: bottom-up, count-based, idempotent, background ----
+// Cap tiles built per invocation so a large backlog (e.g. after downtime) can't
+// exceed the per-event subrequest limit; the rest builds on subsequent turns.
+const MAX_TILES_PER_BUILD = 8
+
 export async function buildStreamPyramid(env: Env): Promise<void> {
   const total = await getTotalPairs(env)
   if (total < 1) return
   const verbatimStart = Math.max(0, total - STREAM.VERBATIM)
+  let built = 0
 
   for (let tier = 1; tier <= STREAM.MAX_TIER; tier++) {
     const size = STREAM.WIDTH ** tier
@@ -86,6 +91,7 @@ export async function buildStreamPyramid(env: Env): Promise<void> {
       if (!existing.has(start)) {
         if (tier === 1) {
           await buildTier1Tile(env, start, end)
+          built++
         } else {
           const children = (await env.DB.prepare(
             `SELECT * FROM stream_summaries WHERE tier = ? AND start_index >= ? AND end_index <= ?
@@ -93,8 +99,10 @@ export async function buildStreamPyramid(env: Env): Promise<void> {
           ).bind(tier - 1, start, end).all<StreamSummaryRow>()).results
           if (children.length >= STREAM.WIDTH) {
             await buildHigherTile(env, tier, start, end, children)
+            built++
           }
         }
+        if (built >= MAX_TILES_PER_BUILD) { await pruneStream(env, total); return }
       }
       start += size
     }

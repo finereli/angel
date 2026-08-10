@@ -38,7 +38,7 @@ export async function addObservation(
   ).bind(content, source, conversationId ?? null).run()
   const obsId = result.meta.last_row_id as number
 
-  for (const name of tagNames) {
+  for (const name of Array.from(new Set(tagNames))) { // dedupe so counts don't drift
     // Auto-create missing tags so an observation is never lost.
     const tagId = await createTag(env, name, '')
     await env.DB.prepare(
@@ -54,44 +54,58 @@ export async function addObservation(
 }
 
 // ---- Per-tag observation summary pyramid (greedy, provenance-tracked) ----
+// Cap summaries created per invocation so a backlog can't blow the subrequest
+// limit or run long; the rest rolls up on subsequent turns.
+const MAX_SUMMARIES_PER_BUILD = 6
+
 export async function buildObservationPyramid(env: Env): Promise<void> {
   const tags = await getAllTags(env)
+  const budget = { left: MAX_SUMMARIES_PER_BUILD }
   for (const tag of tags) {
-    await rollupTag(env, tag.id, tag.name)
+    if (budget.left <= 0) break
+    await rollupTag(env, tag.id, tag.name, budget)
   }
 }
 
-async function rollupTag(env: Env, tagId: string, tagName: string): Promise<void> {
+async function rollupTag(env: Env, tagId: string, tagName: string, budget: { left: number }): Promise<void> {
   // Tier 0: batch unsummarized observations
   let unsummarized = await getUnsummarizedObservations(env, tagId)
-  while (unsummarized.length >= OBS.OBS_BATCH) {
+  while (unsummarized.length >= OBS.OBS_BATCH && budget.left > 0) {
     const batch = unsummarized.slice(0, OBS.OBS_BATCH)
     await createObsSummary(env, tagId, 0, tagName,
       batch.map(o => ({ type: 'observation' as const, id: o.id, text: o.content, ts: o.created_at, count: 1 })))
+    budget.left--
     unsummarized = unsummarized.slice(OBS.OBS_BATCH)
   }
 
   // Higher tiers: batch unsummarized tier-t summaries into tier-(t+1)
-  for (let tier = 0; tier < 8; tier++) {
+  for (let tier = 0; tier < 8 && budget.left > 0; tier++) {
     let pending = await getUnsummarizedSummaries(env, tagId, tier)
     if (pending.length < OBS.SUM_BATCH) break
-    while (pending.length >= OBS.SUM_BATCH) {
+    while (pending.length >= OBS.SUM_BATCH && budget.left > 0) {
       const batch = pending.slice(0, OBS.SUM_BATCH)
       await createObsSummary(env, tagId, tier + 1, tagName,
         batch.map(s => ({ type: 'summary' as const, id: s.id, text: s.text, ts: s.end_ts || s.created_at, count: s.source_count })))
+      budget.left--
       pending = pending.slice(OBS.SUM_BATCH)
     }
   }
 }
 
 async function getUnsummarizedObservations(env: Env, tagId: string): Promise<ObservationRow[]> {
+  // "Unsummarized for THIS tag": an observation tagged to several tags must be
+  // rolled up once per tag, so scope the exclusion to summaries of this tag.
   return (await env.DB.prepare(
     `SELECT o.* FROM observations o
      JOIN observation_tags ot ON ot.observation_id = o.id
-     LEFT JOIN summary_sources ss ON ss.source_type = 'observation' AND ss.source_id = o.id
-     WHERE ot.tag_id = ? AND ss.summary_id IS NULL
+     WHERE ot.tag_id = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM summary_sources ss
+         JOIN observation_summaries os ON os.id = ss.summary_id
+         WHERE ss.source_type = 'observation' AND ss.source_id = o.id AND os.tag_id = ?
+       )
      ORDER BY o.created_at ASC, o.id ASC`
-  ).bind(tagId).all<ObservationRow>()).results
+  ).bind(tagId, tagId).all<ObservationRow>()).results
 }
 
 async function getUnsummarizedSummaries(env: Env, tagId: string, tier: number): Promise<ObservationSummaryRow[]> {
@@ -139,6 +153,7 @@ Write in your own voice - this is your memory, not a report. First person is fin
 export async function embed(env: Env, sourceType: string, sourceId: number, text: string): Promise<void> {
   try {
     const vec = await generateEmbedding(env, text)
+    if (vec.length === 0) return // don't store empty vectors (they poison cosine with NaN)
     await env.DB.prepare(
       `INSERT OR REPLACE INTO embeddings (source_type, source_id, vector) VALUES (?, ?, ?)`
     ).bind(sourceType, sourceId, JSON.stringify(vec)).run()
@@ -168,15 +183,30 @@ export interface RecallHit {
 // Search observations AND per-tag summaries; label each by level and backing count.
 export async function recall(env: Env, query: string, limit = 8): Promise<RecallHit[]> {
   const queryVec = await generateEmbedding(env, query)
-  const rows = (await env.DB.prepare(
-    `SELECT source_type, source_id, vector FROM embeddings`
-  ).all<{ source_type: string; source_id: number; vector: string }>()).results
+  if (queryVec.length === 0) return []
 
-  const scored = rows.map(r => ({
-    source_type: r.source_type,
-    source_id: r.source_id,
-    score: cosineSimilarity(queryVec, JSON.parse(r.vector)),
-  })).sort((a, b) => b.score - a.score).slice(0, limit)
+  // Page through embeddings by id so a large memory never returns one huge D1
+  // result (which would blow the result-size cap and break recall entirely).
+  const PAGE = 500
+  const top: Array<{ source_type: string; source_id: number; score: number }> = []
+  let afterId = 0
+  for (;;) {
+    const page = (await env.DB.prepare(
+      `SELECT id, source_type, source_id, vector FROM embeddings WHERE id > ? ORDER BY id LIMIT ?`
+    ).bind(afterId, PAGE).all<{ id: number; source_type: string; source_id: number; vector: string }>()).results
+    if (page.length === 0) break
+    for (const r of page) {
+      afterId = r.id
+      let vec: number[]
+      try { vec = JSON.parse(r.vector) } catch { continue }
+      if (!vec.length) continue
+      const score = cosineSimilarity(queryVec, vec)
+      if (Number.isNaN(score)) continue
+      top.push({ source_type: r.source_type, source_id: r.source_id, score })
+    }
+    if (page.length < PAGE) break
+  }
+  const scored = top.sort((a, b) => b.score - a.score).slice(0, limit)
 
   const hits: RecallHit[] = []
   for (const m of scored) {

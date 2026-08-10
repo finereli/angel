@@ -174,11 +174,14 @@ export type ServerMsg =
   | { type: 'tool_result'; conversationId: string; seq: number; id: string; result: string }
   | { type: 'done'; conversationId: string; seq: number; usage?: { input: number; output: number } }
   | { type: 'error'; conversationId: string; seq: number; message: string }
+  | { type: 'stream:reset'; conversationId: string; seq: number }
 
 // Agent event types (internal, yielded by the agent loop)
 export type AgentEvent =
   | { type: 'text'; content: string }
   | { type: 'tool_start'; id: string; name: string; label: string }
   | { type: 'tool_result'; id: string; result: string }
+  | { type: 'reset' } // a truncated attempt is being discarded; clear the current round's partial
+  | { type: 'commit' } // the current round's text is final (a tool round follows)
   | { type: 'done'; usage?: { input: number; output: number } }
   | { type: 'error'; message: string }

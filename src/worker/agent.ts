@@ -36,12 +36,15 @@ function recapTurns(tiles: StreamSummaryRow[]): ChatMessage[] {
 }
 
 // Verbatim tail as real prior turns, each marked with date + thread topic.
+// Skip unanswered pairs (an in-flight message from another thread, or a turn that
+// errored before saving a reply) so they can't appear as history to answer.
 function verbatimTurns(pairs: Pair[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const p of pairs) {
+    if (!p.assistantContent) continue
     const marker = `[${dateLine(p.userTs)}${p.topic ? ` · ${p.topic}` : ''}]`
     msgs.push({ role: 'user', content: `${marker} ${p.userContent}` })
-    if (p.assistantContent) msgs.push({ role: 'assistant', content: p.assistantContent })
+    msgs.push({ role: 'assistant', content: p.assistantContent })
   }
   return msgs
 }
@@ -76,44 +79,77 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
   const tools = getToolDefinitions()
   let totalInput = 0
   let totalOutput = 0
+  let fullText = '' // all committed rounds' text; this is the saved reply
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     let assistantText = ''
-    const toolCalls: ToolCall[] = []
-    const toolCallArgs = new Map<number, string>()
+    let toolCalls: ToolCall[] = []
+    let toolCallArgs = new Map<number, string>()
+    let truncated = false
 
-    for await (const chunk of chatCompletionStream(env, messages, { tools })) {
-      const choice = chunk.choices[0]
-      if (!choice) continue
-      if (choice.delta.content) {
-        assistantText += choice.delta.content
-        yield { type: 'text', content: choice.delta.content }
+    // A dropped stream throws (see llm.ts). Retry the round from scratch,
+    // telling the client to discard the truncated partial first.
+    const STREAM_ATTEMPTS = 3
+    for (let attempt = 0; attempt < STREAM_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        yield { type: 'reset' }
+        assistantText = ''
+        toolCalls = []
+        toolCallArgs = new Map<number, string>()
       }
-      if (choice.delta.tool_calls) {
-        for (const tc of choice.delta.tool_calls) {
-          if (tc.id) {
-            toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
+      try {
+        for await (const chunk of chatCompletionStream(env, messages, { tools })) {
+          const choice = chunk.choices[0]
+          if (!choice) continue
+          if (choice.delta.content) {
+            assistantText += choice.delta.content
+            yield { type: 'text', content: choice.delta.content }
           }
-          if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
-          if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
+          if (choice.delta.tool_calls) {
+            for (const tc of choice.delta.tool_calls) {
+              if (tc.id) {
+                toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
+              }
+              if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
+              if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
+            }
+          }
+          if (chunk.usage) { totalInput += chunk.usage.prompt_tokens; totalOutput += chunk.usage.completion_tokens }
+        }
+        truncated = false
+        break // clean finish
+      } catch (e) {
+        console.error(`[runAgent] stream attempt ${attempt + 1}/${STREAM_ATTEMPTS} failed:`, e instanceof Error ? e.message : e)
+        truncated = true
+        if (attempt === STREAM_ATTEMPTS - 1) {
+          if (assistantText.length > 0 || toolCalls.filter(Boolean).length > 0) break // keep best effort
+          throw e
         }
       }
-      if (chunk.usage) { totalInput += chunk.usage.prompt_tokens; totalOutput += chunk.usage.completion_tokens }
     }
 
     for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
-    const valid = toolCalls.filter(Boolean)
+    // Only execute well-formed tool calls - a truncated stream can leave a
+    // half-serialized call with unparseable arguments or an empty name.
+    const valid = toolCalls.filter(tc => tc && tc.function.name && isParseableArgs(tc.function.arguments))
 
     if (valid.length === 0) {
-      await saveMessage(env, conversationId, 'assistant', assistantText, undefined, totalInput, totalOutput)
+      // No (usable) tool calls: this is the final reply for the turn.
+      let finalText = fullText + assistantText
+      if (truncated && finalText.trim()) finalText += ' …[cut off]'
+      if (!finalText.trim()) finalText = '*(the response was cut off before anything came through)*'
+      await saveMessage(env, conversationId, 'assistant', finalText, undefined, totalInput, totalOutput)
       yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
       return
     }
 
+    // Commit this round's text before running tools; a later reset can't roll past it.
+    fullText += assistantText
+    yield { type: 'commit' }
     messages.push({ role: 'assistant', content: assistantText || null, tool_calls: valid })
     for (const tc of valid) {
       let args: Record<string, unknown>
-      try { args = JSON.parse(tc.function.arguments) } catch { args = {} }
+      try { args = JSON.parse(tc.function.arguments || '{}') } catch { args = {} }
       yield { type: 'tool_start', id: tc.id, name: tc.function.name, label: toolLabel(tc.function.name, args) }
       let result: string
       try { result = await executeTool(env, conversationId, tc.function.name, args) }
@@ -123,8 +159,16 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     }
   }
 
+  // Exhausted the tool-round budget: save whatever text we produced.
+  if (fullText.trim()) await saveMessage(env, conversationId, 'assistant', fullText, undefined, totalInput, totalOutput)
   yield { type: 'error', message: 'Reached maximum tool call rounds' }
   yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
+}
+
+function isParseableArgs(s: string): boolean {
+  const t = (s || '').trim()
+  if (t === '') return true // no-arg call
+  try { JSON.parse(t); return true } catch { return false }
 }
 
 // ---- Memory pass (off hot path): the same Angel, full context, deciding what to keep ----
@@ -147,20 +191,26 @@ export async function runMemoryPass(env: Env, conversationId: string): Promise<v
     const toolCalls: ToolCall[] = []
     const toolCallArgs = new Map<number, string>()
 
-    for await (const chunk of chatCompletionStream(env, messages, { tools })) {
-      const choice = chunk.choices[0]
-      if (!choice) continue
-      if (choice.delta.content) text += choice.delta.content
-      if (choice.delta.tool_calls) {
-        for (const tc of choice.delta.tool_calls) {
-          if (tc.id) toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
-          if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
-          if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
+    try {
+      for await (const chunk of chatCompletionStream(env, messages, { tools })) {
+        const choice = chunk.choices[0]
+        if (!choice) continue
+        if (choice.delta.content) text += choice.delta.content
+        if (choice.delta.tool_calls) {
+          for (const tc of choice.delta.tool_calls) {
+            if (tc.id) toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
+            if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
+            if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
+          }
         }
       }
+    } catch (e) {
+      // A dropped stream here is best-effort: run any well-formed tool calls we
+      // did get, otherwise give up on this turn's memory pass.
+      console.error('[runMemoryPass] stream failed:', e instanceof Error ? e.message : e)
     }
     for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
-    const valid = toolCalls.filter(Boolean)
+    const valid = toolCalls.filter(tc => tc && tc.function.name && isParseableArgs(tc.function.arguments))
     if (valid.length === 0) return
 
     messages.push({ role: 'assistant', content: text || null, tool_calls: valid })

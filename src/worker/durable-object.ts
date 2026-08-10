@@ -11,6 +11,7 @@ interface ActiveStream {
   conversationId: string
   seq: number
   text: string
+  commitLen: number // length of `text` committed by prior tool rounds (reset floor)
   tools: Array<{ id: string; name: string; label: string; result?: string }>
   aborted: boolean
 }
@@ -23,7 +24,9 @@ export class AngelDO implements DurableObject {
   private state: DurableObjectState
   private env: Env
   private activeStreams = new Map<string, ActiveStream>()
-  // Serializes background memory work: a fast follow-up waits for the prior rollup.
+  // Responses stream one at a time (one linear stream); memory work runs on its
+  // own serialized chain so it never blocks the next response.
+  private responseChain: Promise<void> = Promise.resolve()
   private memoryChain: Promise<void> = Promise.resolve()
 
   constructor(state: DurableObjectState, env: Env) {
@@ -186,127 +189,112 @@ export class AngelDO implements DurableObject {
   }
 
   private async handleChat(conversationId: string, clientMsgId: string, content: string) {
-    if (this.activeStreams.has(conversationId)) {
-      this.broadcast({
-        type: 'error',
-        conversationId,
-        seq: 0,
-        message: 'A response is already in progress',
-      })
-      return
-    }
-
-    const stream: ActiveStream = {
-      conversationId,
-      seq: 0,
-      text: '',
-      tools: [],
-      aborted: false,
-    }
-
+    // Persist and echo the user message immediately so it is never lost, even if
+    // a turn ahead of it in the queue is still streaming.
     try {
-      // Wait for any in-flight memory rollup so context renders from a settled state.
-      await this.memoryChain.catch(() => {})
-
       const result = await this.env.DB.prepare(
         `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
       ).bind(conversationId, content).run()
-
       await this.env.DB.prepare(
         `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
       ).bind(conversationId).run()
-
       this.broadcast({
-        type: 'msg:user',
-        conversationId,
-        clientMsgId,
-        messageId: result.meta.last_row_id,
-        content,
+        type: 'msg:user', conversationId, clientMsgId,
+        messageId: result.meta.last_row_id, content,
       })
+    } catch (e) {
+      console.error('[handleChat] save user message failed:', e instanceof Error ? e.message : e)
+      return
+    }
 
-      this.activeStreams.set(conversationId, stream)
+    // Responses are serialized across the whole DO: a second message queues
+    // behind the first rather than racing it or contaminating its context.
+    const respLink = this.responseChain.then(() => this.streamResponse(conversationId, content))
+    this.responseChain = respLink.then(() => {}, () => {})
+    let assistantText = ''
+    try { assistantText = await respLink }
+    catch (e) { console.error('[handleChat] response failed:', e instanceof Error ? e.message : e) }
 
+    // Memory work runs on its own chain so the next response never waits on it.
+    // We await it here (DO state.waitUntil is a no-op) so the handler keeps the
+    // DO alive until memory actually accretes.
+    const memLink = this.memoryChain.then(() => this.postStreamWork(conversationId, content, assistantText))
+    this.memoryChain = memLink.then(() => {}, () => {})
+    try { await memLink }
+    catch (e) { console.error('[handleChat] memory failed:', e instanceof Error ? e.message : e) }
+  }
+
+  private async streamResponse(conversationId: string, content: string): Promise<string> {
+    const stream: ActiveStream = {
+      conversationId, seq: 0, text: '', commitLen: 0, tools: [], aborted: false,
+    }
+    this.activeStreams.set(conversationId, stream)
+    let sawDone = false
+
+    try {
       for await (const event of runAgent({ env: this.env, conversationId }, content)) {
         if (stream.aborted) break
-
         stream.seq++
-
         switch (event.type) {
           case 'text':
             stream.text += event.content
-            this.broadcast({
-              type: 'text',
-              conversationId,
-              seq: stream.seq,
-              content: event.content,
-            })
+            this.broadcast({ type: 'text', conversationId, seq: stream.seq, content: event.content })
             break
-
+          case 'commit':
+            // Prior rounds' text is now final; a later reset can't roll past it.
+            stream.commitLen = stream.text.length
+            break
+          case 'reset':
+            // Discard only the truncated current round's text; keep committed rounds.
+            stream.text = stream.text.slice(0, stream.commitLen)
+            this.broadcast({ type: 'stream:reset', conversationId, seq: stream.seq })
+            break
           case 'tool_start':
             stream.tools.push({ id: event.id, name: event.name, label: event.label })
-            this.broadcast({
-              type: 'tool_start',
-              conversationId,
-              seq: stream.seq,
-              id: event.id,
-              name: event.name,
-              label: event.label,
-            })
+            this.broadcast({ type: 'tool_start', conversationId, seq: stream.seq, id: event.id, name: event.name, label: event.label })
             break
-
           case 'tool_result': {
             const tool = stream.tools.find(t => t.id === event.id)
             if (tool) tool.result = event.result
-            this.broadcast({
-              type: 'tool_result',
-              conversationId,
-              seq: stream.seq,
-              id: event.id,
-              result: event.result,
-            })
+            this.broadcast({ type: 'tool_result', conversationId, seq: stream.seq, id: event.id, result: event.result })
             break
           }
-
           case 'done':
-            this.broadcast({
-              type: 'done',
-              conversationId,
-              seq: stream.seq,
-              usage: event.usage,
-            })
+            sawDone = true // runAgent already persisted the reply; don't double-save on stop
+            this.broadcast({ type: 'done', conversationId, seq: stream.seq, usage: event.usage })
             break
-
           case 'error':
-            this.broadcast({
-              type: 'error',
-              conversationId,
-              seq: stream.seq,
-              message: event.message,
-            })
+            this.broadcast({ type: 'error', conversationId, seq: stream.seq, message: event.message })
             break
         }
+      }
+
+      // Stop: persist whatever we had so it isn't lost, and close the stream out.
+      // Only if runAgent didn't already save (sawDone) - avoids a double message.
+      if (stream.aborted && !sawDone && stream.text.trim()) {
+        await this.saveAssistant(conversationId, stream.text + '\n\n*(stopped)*')
+        stream.seq++
+        this.broadcast({ type: 'done', conversationId, seq: stream.seq })
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : 'Agent error'
       stream.seq++
-      this.broadcast({
-        type: 'error',
-        conversationId,
-        seq: stream.seq,
-        message: errMsg,
-      })
-      // Save error as assistant message so it persists across reconnects
-      await this.env.DB.prepare(
-        `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`
-      ).bind(conversationId, `*Error: ${errMsg}*`).run().catch(() => {})
+      this.broadcast({ type: 'error', conversationId, seq: stream.seq, message: errMsg })
+      await this.saveAssistant(conversationId, `*Error: ${errMsg}*`).catch(() => {})
     } finally {
       this.activeStreams.delete(conversationId)
     }
 
-    this.memoryChain = this.memoryChain
-      .then(() => this.postStreamWork(conversationId, content, stream.text))
-      .catch(() => {})
-    this.state.waitUntil(this.memoryChain)
+    return stream.text
+  }
+
+  private async saveAssistant(conversationId: string, content: string): Promise<void> {
+    await this.env.DB.prepare(
+      `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`
+    ).bind(conversationId, content).run()
+    await this.env.DB.prepare(
+      `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
+    ).bind(conversationId).run()
   }
 
   private handleStop(conversationId: string) {
@@ -316,12 +304,12 @@ export class AngelDO implements DurableObject {
 
   private async postStreamWork(conversationId: string, userMessage: string, assistantText: string) {
     try {
-      // Name the thread from its first exchange (title doubles as the topic marker).
-      const msgCount = await this.env.DB.prepare(
-        `SELECT COUNT(*) as c FROM messages WHERE conversation_id = ?`
-      ).bind(conversationId).first<{ c: number }>()
-
-      if (msgCount && msgCount.c <= 3) {
+      // Name the thread from its first exchange. Keyed on title IS NULL so a fast
+      // follow-up can't skip titling by pushing the message count past a window.
+      const conv = await this.env.DB.prepare(
+        `SELECT title FROM conversations WHERE id = ?`
+      ).bind(conversationId).first<{ title: string | null }>()
+      if (conv && !conv.title && assistantText.trim()) {
         const title = await generateTitle(this.env, userMessage, assistantText)
         await this.env.DB.prepare(
           `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
@@ -329,12 +317,17 @@ export class AngelDO implements DurableObject {
         this.broadcast({ type: 'conv:title', conversationId, title, topic: title })
       }
 
-      // The same Angel, in parallel, decides what to remember. Then roll up both pyramids.
-      await runMemoryPass(this.env, conversationId)
-      await buildObservationPyramid(this.env)
-      await buildStreamPyramid(this.env)
-    } catch {
-      // background failures are non-fatal
+      // The same Angel decides what to remember, then both pyramids roll up. Each
+      // step is isolated so one failure never blocks the others. LLM calls are
+      // individually timeout-bounded (llm.ts) and builds are capped per run.
+      try { await runMemoryPass(this.env, conversationId) }
+      catch (e) { console.error('[postStreamWork:memory-pass]', e instanceof Error ? e.message : e) }
+      try { await buildObservationPyramid(this.env) }
+      catch (e) { console.error('[postStreamWork:obs-pyramid]', e instanceof Error ? e.message : e) }
+      try { await buildStreamPyramid(this.env) }
+      catch (e) { console.error('[postStreamWork:stream-pyramid]', e instanceof Error ? e.message : e) }
+    } catch (e) {
+      console.error('[postStreamWork] failed:', e instanceof Error ? e.message : e)
     }
   }
 

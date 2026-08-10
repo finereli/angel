@@ -242,6 +242,19 @@ class AngelClient {
         break
       }
 
+      case 'stream:reset': {
+        // A truncated round was discarded server-side. Drop only the current
+        // round's trailing text; committed tool rounds and their text stay.
+        const state = this.getConvState(msg.conversationId)
+        const parts = [...state.streamParts]
+        if (parts.length && parts[parts.length - 1].type === 'text') parts.pop()
+        state.streamParts = parts
+        state.streamSeq = msg.seq
+        state.streamState = 'streaming'
+        this.notify()
+        break
+      }
+
       case 'text': {
         const state = this.getConvState(msg.conversationId)
         if (msg.seq > state.streamSeq) {
