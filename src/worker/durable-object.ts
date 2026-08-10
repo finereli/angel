@@ -1,6 +1,6 @@
 import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
-  ConversationRow, MessageRow, AgentEvent
+  ConversationRow, MessageRow, AgentEvent, StreamPart
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
 import { generateTitle } from './title'
@@ -13,6 +13,7 @@ interface ActiveStream {
   text: string
   commitLen: number // length of `text` committed by prior tool rounds (reset floor)
   tools: Array<{ id: string; name: string; label: string; result?: string }>
+  parts: StreamPart[] // ordered text/tool parts, as the reply is rendered
   aborted: boolean
 }
 
@@ -91,6 +92,7 @@ export class AngelDO implements DurableObject {
             seq: stream.seq,
             text: stream.text,
             tools: stream.tools,
+            parts: stream.parts,
           })
         }
         this.send(ws, { type: 'auth:ok', activeStreams: snapshots })
@@ -177,7 +179,7 @@ export class AngelDO implements DurableObject {
 
     const stream = this.activeStreams.get(conversationId)
     const snapshot: StreamSnapshot | undefined = stream
-      ? { conversationId, seq: stream.seq, text: stream.text, tools: stream.tools }
+      ? { conversationId, seq: stream.seq, text: stream.text, tools: stream.tools, parts: stream.parts }
       : undefined
 
     this.send(ws, {
@@ -226,7 +228,7 @@ export class AngelDO implements DurableObject {
 
   private async streamResponse(conversationId: string, content: string): Promise<string> {
     const stream: ActiveStream = {
-      conversationId, seq: 0, text: '', commitLen: 0, tools: [], aborted: false,
+      conversationId, seq: 0, text: '', commitLen: 0, tools: [], parts: [], aborted: false,
     }
     this.activeStreams.set(conversationId, stream)
     let sawDone = false
@@ -236,10 +238,15 @@ export class AngelDO implements DurableObject {
         if (stream.aborted) break
         stream.seq++
         switch (event.type) {
-          case 'text':
+          case 'text': {
             stream.text += event.content
+            // Append to the current text part so tools stay where they were used.
+            const last = stream.parts[stream.parts.length - 1]
+            if (last && last.type === 'text') last.content += event.content
+            else stream.parts.push({ type: 'text', content: event.content })
             this.broadcast({ type: 'text', conversationId, seq: stream.seq, content: event.content })
             break
+          }
           case 'commit':
             // Prior rounds' text is now final; a later reset can't roll past it.
             stream.commitLen = stream.text.length
@@ -247,20 +254,25 @@ export class AngelDO implements DurableObject {
           case 'reset':
             // Discard only the truncated current round's text; keep committed rounds.
             stream.text = stream.text.slice(0, stream.commitLen)
+            if (stream.parts.length && stream.parts[stream.parts.length - 1].type === 'text') stream.parts.pop()
             this.broadcast({ type: 'stream:reset', conversationId, seq: stream.seq })
             break
           case 'tool_start':
             stream.tools.push({ id: event.id, name: event.name, label: event.label })
+            stream.parts.push({ type: 'tool', id: event.id, name: event.name, label: event.label })
             this.broadcast({ type: 'tool_start', conversationId, seq: stream.seq, id: event.id, name: event.name, label: event.label })
             break
           case 'tool_result': {
             const tool = stream.tools.find(t => t.id === event.id)
             if (tool) tool.result = event.result
+            const p = stream.parts.find(x => x.type === 'tool' && x.id === event.id)
+            if (p && p.type === 'tool') p.result = event.result
             this.broadcast({ type: 'tool_result', conversationId, seq: stream.seq, id: event.id, result: event.result })
             break
           }
           case 'done':
-            sawDone = true // runAgent already persisted the reply; don't double-save on stop
+            sawDone = true
+            await this.saveAssistant(conversationId, stream.text || '*(no response)*', stream.parts, event.usage)
             this.broadcast({ type: 'done', conversationId, seq: stream.seq, usage: event.usage })
             break
           case 'error':
@@ -270,9 +282,10 @@ export class AngelDO implements DurableObject {
       }
 
       // Stop: persist whatever we had so it isn't lost, and close the stream out.
-      // Only if runAgent didn't already save (sawDone) - avoids a double message.
+      // Only if we didn't already save on `done` - avoids a double message.
       if (stream.aborted && !sawDone && stream.text.trim()) {
-        await this.saveAssistant(conversationId, stream.text + '\n\n*(stopped)*')
+        stream.parts.push({ type: 'text', content: '\n\n*(stopped)*' })
+        await this.saveAssistant(conversationId, stream.text + '\n\n*(stopped)*', stream.parts)
         stream.seq++
         this.broadcast({ type: 'done', conversationId, seq: stream.seq })
       }
@@ -280,7 +293,11 @@ export class AngelDO implements DurableObject {
       const errMsg = e instanceof Error ? e.message : 'Agent error'
       stream.seq++
       this.broadcast({ type: 'error', conversationId, seq: stream.seq, message: errMsg })
-      await this.saveAssistant(conversationId, `*Error: ${errMsg}*`).catch(() => {})
+      // Keep any committed text (earlier rounds) rather than losing it to the error.
+      const hadText = stream.text.trim().length > 0
+      if (hadText) stream.parts.push({ type: 'text', content: `\n\n*(error: ${errMsg})*` })
+      const finalContent = hadText ? `${stream.text}\n\n*(error: ${errMsg})*` : `*Error: ${errMsg}*`
+      await this.saveAssistant(conversationId, finalContent, hadText ? stream.parts : undefined).catch(() => {})
     } finally {
       this.activeStreams.delete(conversationId)
     }
@@ -288,10 +305,18 @@ export class AngelDO implements DurableObject {
     return stream.text
   }
 
-  private async saveAssistant(conversationId: string, content: string): Promise<void> {
+  private async saveAssistant(
+    conversationId: string, content: string,
+    parts?: StreamPart[], usage?: { input: number; output: number }
+  ): Promise<void> {
     await this.env.DB.prepare(
-      `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`
-    ).bind(conversationId, content).run()
+      `INSERT INTO messages (conversation_id, role, content, parts, usage_input, usage_output)
+       VALUES (?, 'assistant', ?, ?, ?, ?)`
+    ).bind(
+      conversationId, content,
+      parts && parts.length ? JSON.stringify(parts) : null,
+      usage?.input ?? null, usage?.output ?? null,
+    ).run()
     await this.env.DB.prepare(
       `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
     ).bind(conversationId).run()

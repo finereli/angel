@@ -176,17 +176,32 @@
         {:else if msg.role === 'assistant'}
           <div class="message assistant">
             <div class="message-content prose">
-              {@html renderMarkdown(msg.content)}
-              {#if msg.tool_calls}
-                {@const tools = typeof msg.tool_calls === 'string' ? JSON.parse(msg.tool_calls) : msg.tool_calls}
-                <div class="tool-actions">
-                  {#each tools as tool}
-                    <span class="tool-row done" title={tool.name}>
+              {#if msg.parts}
+                <!-- Ordered parts: tools render exactly where they were used. -->
+                {@const parts = typeof msg.parts === 'string' ? JSON.parse(msg.parts) : msg.parts}
+                {#each parts as part}
+                  {#if part.type === 'text'}
+                    {@html renderMarkdown(part.content)}
+                  {:else}
+                    <div class="tool-row done" title={part.name}>
                       <svg class="tool-check" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
-                      {tool.label || toolLabel(tool.name)}
-                    </span>
-                  {/each}
-                </div>
+                      {part.label || toolLabel(part.name)}
+                    </div>
+                  {/if}
+                {/each}
+              {:else}
+                {@html renderMarkdown(msg.content)}
+                {#if msg.tool_calls}
+                  {@const tools = typeof msg.tool_calls === 'string' ? JSON.parse(msg.tool_calls) : msg.tool_calls}
+                  <div class="tool-actions">
+                    {#each tools as tool}
+                      <span class="tool-row done" title={tool.name}>
+                        <svg class="tool-check" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
+                        {tool.label || toolLabel(tool.name)}
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
               {/if}
             </div>
           </div>

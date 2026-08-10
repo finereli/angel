@@ -30,7 +30,13 @@ export interface MessageRow {
   tool_call_id: string | null
   usage_input: number | null
   usage_output: number | null
+  parts: string | null // JSON StreamPart[] for interleaved rendering (UI only)
 }
+
+// Interleaved render parts of an assistant reply (text and tools, in order).
+export type StreamPart =
+  | { type: 'text'; content: string }
+  | { type: 'tool'; id: string; name: string; label: string; result?: string }
 
 export interface TagRow {
   id: string
@@ -147,6 +153,7 @@ export interface StreamSnapshot {
   seq: number
   text: string
   tools: Array<{ id: string; name: string; label: string; result?: string }>
+  parts: StreamPart[] // ordered text/tool parts for interleaved reconnect rendering
 }
 
 export type ClientMsg =

@@ -134,11 +134,11 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     const valid = toolCalls.filter(tc => tc && tc.function.name && isParseableArgs(tc.function.arguments))
 
     if (valid.length === 0) {
-      // No (usable) tool calls: this is the final reply for the turn.
-      let finalText = fullText + assistantText
-      if (truncated && finalText.trim()) finalText += ' …[cut off]'
-      if (!finalText.trim()) finalText = '*(the response was cut off before anything came through)*'
-      await saveMessage(env, conversationId, 'assistant', finalText, undefined, totalInput, totalOutput)
+      // No (usable) tool calls: this is the final reply for the turn. The DO has
+      // accumulated the streamed text; emit any trailing marker as text so it
+      // lands in the saved reply too, then let the DO persist on `done`.
+      if (truncated && (fullText + assistantText).trim()) yield { type: 'text', content: ' …[cut off]' }
+      else if (!(fullText + assistantText).trim()) yield { type: 'text', content: '*(the response was cut off before anything came through)*' }
       yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
       return
     }
@@ -159,8 +159,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     }
   }
 
-  // Exhausted the tool-round budget: save whatever text we produced.
-  if (fullText.trim()) await saveMessage(env, conversationId, 'assistant', fullText, undefined, totalInput, totalOutput)
+  // Exhausted the tool-round budget: the DO persists the accumulated text on `done`.
   yield { type: 'error', message: 'Reached maximum tool call rounds' }
   yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
 }
@@ -244,13 +243,3 @@ function toolLabel(name: string, args: Record<string, unknown>): string {
   }
 }
 
-async function saveMessage(
-  env: Env, conversationId: string, role: string, content: string,
-  toolCalls?: ToolCall[], usageInput?: number, usageOutput?: number
-): Promise<void> {
-  await env.DB.prepare(
-    `INSERT INTO messages (conversation_id, role, content, tool_calls, usage_input, usage_output)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(conversationId, role, content, toolCalls ? JSON.stringify(toolCalls) : null, usageInput ?? null, usageOutput ?? null).run()
-  await env.DB.prepare(`UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`).bind(conversationId).run()
-}

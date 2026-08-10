@@ -229,6 +229,7 @@ class AngelClient {
           tool_call_id: null,
           usage_input: null,
           usage_output: null,
+          parts: null,
         }
         const optIdx = state.messages.findIndex(m => m.id < 0 && m.role === 'user')
         if (optIdx >= 0) {
@@ -300,22 +301,20 @@ class AngelClient {
 
       case 'done': {
         const state = this.getConvState(msg.conversationId)
-        const text = state.streamParts
-          .filter(p => p.type === 'text')
-          .map(p => (p as { content: string }).content)
-          .join('')
-        const tools = state.streamParts.filter(p => p.type === 'tool')
-        if (text || tools.length > 0) {
+        const parts = state.streamParts
+        const text = parts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
+        if (parts.length > 0) {
           state.messages = [...state.messages, {
             id: nextMsgKey--,
             conversation_id: msg.conversationId,
             role: 'assistant',
             content: text,
             created_at: new Date().toISOString(),
-            tool_calls: tools.length > 0 ? JSON.stringify(tools) : null,
+            tool_calls: null,
             tool_call_id: null,
             usage_input: msg.usage?.input ?? null,
             usage_output: msg.usage?.output ?? null,
+            parts: JSON.stringify(parts), // keep tools where they were used
           }]
         }
         state.streamState = 'idle'
@@ -327,11 +326,10 @@ class AngelClient {
 
       case 'error': {
         const state = this.getConvState(msg.conversationId)
-        const text = state.streamParts
-          .filter(p => p.type === 'text')
-          .map(p => (p as { content: string }).content)
-          .join('')
-        if (text) {
+        const parts: StreamPart[] = [...state.streamParts]
+        const text = parts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
+        if (parts.length > 0) {
+          parts.push({ type: 'text', content: `\n\n*Error: ${msg.message}*` })
           state.messages = [...state.messages, {
             id: nextMsgKey--,
             conversation_id: msg.conversationId,
@@ -342,6 +340,7 @@ class AngelClient {
             tool_call_id: null,
             usage_input: null,
             usage_output: null,
+            parts: JSON.stringify(parts),
           }]
         }
         state.streamState = 'idle'
@@ -374,6 +373,7 @@ class AngelClient {
       tool_call_id: null,
       usage_input: null,
       usage_output: null,
+      parts: null,
     }]
     state.streamState = 'streaming'
     state.streamParts = []
@@ -429,10 +429,10 @@ class AngelClient {
 }
 
 function rebuildPartsFromSnapshot(snapshot: StreamSnapshot): StreamPart[] {
+  // Prefer the ordered parts so tools reconnect where they were used.
+  if (snapshot.parts && snapshot.parts.length) return snapshot.parts as StreamPart[]
   const parts: StreamPart[] = []
-  if (snapshot.text) {
-    parts.push({ type: 'text', content: snapshot.text })
-  }
+  if (snapshot.text) parts.push({ type: 'text', content: snapshot.text })
   for (const tool of snapshot.tools) {
     parts.push({ type: 'tool', id: tool.id, name: tool.name, label: tool.label, result: tool.result })
   }
