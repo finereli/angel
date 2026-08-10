@@ -34,9 +34,11 @@ class AngelClient {
   private pingInterval: ReturnType<typeof setInterval> | null = null
   private pongTimeout: ReturnType<typeof setTimeout> | null = null
   private pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
+  private conversationsLoaded = false
 
   getConnState(): ConnState { return this.connState }
   getConversations(): ConversationRow[] { return this.conversations }
+  hasLoadedConversations(): boolean { return this.conversationsLoaded }
 
   getConvState(id: string): ConversationState {
     if (!this.convStates.has(id)) {
@@ -176,6 +178,7 @@ class AngelClient {
 
       case 'conv:list':
         this.conversations = msg.conversations
+        this.conversationsLoaded = true
         this.notify()
         break
 
@@ -193,7 +196,16 @@ class AngelClient {
         break
 
       case 'conv:archived':
-        this.conversations = this.conversations.filter(c => c.id !== msg.conversationId)
+        this.conversations = this.conversations.map(c =>
+          c.id === msg.conversationId ? { ...c, archived: 1 } : c
+        )
+        this.notify()
+        break
+
+      case 'conv:unarchived':
+        this.conversations = this.conversations.map(c =>
+          c.id === msg.conversationId ? { ...c, archived: 0 } : c
+        )
         this.notify()
         break
 
@@ -244,12 +256,10 @@ class AngelClient {
       }
 
       case 'stream:reset': {
-        // A truncated round was discarded server-side. Drop only the current
-        // round's trailing text; committed tool rounds and their text stay.
+        // A truncated attempt was discarded server-side. The server sends the
+        // authoritative parts back to the last committed boundary.
         const state = this.getConvState(msg.conversationId)
-        const parts = [...state.streamParts]
-        if (parts.length && parts[parts.length - 1].type === 'text') parts.pop()
-        state.streamParts = parts
+        state.streamParts = msg.parts as StreamPart[]
         state.streamSeq = msg.seq
         state.streamState = 'streaming'
         this.notify()
@@ -301,7 +311,8 @@ class AngelClient {
 
       case 'done': {
         const state = this.getConvState(msg.conversationId)
-        const parts = state.streamParts
+        // Drop any tool announced but never completed (truncated tail).
+        const parts = state.streamParts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined))
         const text = parts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
         if (parts.length > 0) {
           state.messages = [...state.messages, {
@@ -394,6 +405,14 @@ class AngelClient {
 
   archiveConversation(id: string) {
     this.send({ type: 'conv:archive', conversationId: id })
+  }
+
+  renameConversation(id: string, title: string) {
+    this.send({ type: 'conv:rename', conversationId: id, title })
+  }
+
+  unarchiveConversation(id: string) {
+    this.send({ type: 'conv:unarchive', conversationId: id })
   }
 
   loadConversation(id: string) {

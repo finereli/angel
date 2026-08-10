@@ -1,5 +1,5 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
-import { chatCompletionStream, chatCompletion } from './llm'
+import { chatCompletionStream } from './llm'
 import { getToolDefinitions, executeTool } from './tools'
 import { OPERATING_NOTES } from './identity'
 import { buildListsPreamble } from './lists'
@@ -86,6 +86,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     let toolCalls: ToolCall[] = []
     let toolCallArgs = new Map<number, string>()
     let truncated = false
+    const announced = new Set<string>() // tool ids already shown to the client
 
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
     // telling the client to discard the truncated partial first.
@@ -96,6 +97,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         assistantText = ''
         toolCalls = []
         toolCallArgs = new Map<number, string>()
+        announced.clear()
       }
       try {
         for await (const chunk of chatCompletionStream(env, messages, { tools })) {
@@ -112,6 +114,13 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
               }
               if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
               if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
+              // Announce as soon as we know the tool's id + name, so the client can
+              // show "Recording observation…" while the arguments are still generating.
+              const call = toolCalls[tc.index]
+              if (call && call.id && call.function.name && !announced.has(call.id)) {
+                announced.add(call.id)
+                yield { type: 'tool_start', id: call.id, name: call.function.name, label: '' }
+              }
             }
           }
           if (chunk.usage) { totalInput += chunk.usage.prompt_tokens; totalOutput += chunk.usage.completion_tokens }
@@ -148,9 +157,13 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     yield { type: 'commit' }
     messages.push({ role: 'assistant', content: assistantText || null, tool_calls: valid })
     for (const tc of valid) {
+      // Usually already announced mid-stream; announce here only if it wasn't.
+      if (!announced.has(tc.id)) {
+        announced.add(tc.id)
+        yield { type: 'tool_start', id: tc.id, name: tc.function.name, label: '' }
+      }
       let args: Record<string, unknown>
       try { args = JSON.parse(tc.function.arguments || '{}') } catch { args = {} }
-      yield { type: 'tool_start', id: tc.id, name: tc.function.name, label: toolLabel(tc.function.name, args) }
       let result: string
       try { result = await executeTool(env, conversationId, tc.function.name, args) }
       catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
@@ -221,48 +234,6 @@ export async function runMemoryPass(env: Env, conversationId: string): Promise<v
       catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
-  }
-}
-
-// Name a freshly-started tangent. A small call, but with the FULL assembled
-// context (recap + verbatim), the same material the memory pass sees - so the
-// title reflects what we're actually on, not a guess from a truncated first line.
-export async function nameThread(env: Env): Promise<string | null> {
-  const { tiles, verbatim } = await renderStreamContext(env)
-  const messages: ChatMessage[] = [
-    ...recapTurns(tiles),
-    ...verbatimTurns(verbatim),
-    {
-      role: 'user',
-      content: "(naming) In 3 to 6 words, name the thread we just started - what this conversation is about, judging from the latest exchange. Reply with only the title: no quotes, no trailing period, no preamble.",
-    },
-  ]
-  try {
-    const res = await chatCompletion(env, messages, { temperature: 0.3, max_tokens: 24 })
-    const title = (res.content || '').trim().replace(/^["']+|["']+$/g, '').replace(/[.]+$/, '').trim()
-    return title || null
-  } catch (e) {
-    console.error('[nameThread]', e instanceof Error ? e.message : e)
-    return null
-  }
-}
-
-function toolLabel(name: string, args: Record<string, unknown>): string {
-  const trunc = (s: unknown, max: number) => { const str = String(s || ''); return str.length > max ? str.slice(0, max) + '…' : str }
-  switch (name) {
-    case 'record_observation': return `Noting: ${trunc(args.content, 60)}`
-    case 'recall': return `Recalling "${trunc(args.query, 40)}"`
-    case 'create_tag': return `New tag "${args.name}"`
-    case 'update_tag_description': return `Updating tag "${args.name}"`
-    case 'list_tags': return 'Reviewing tags'
-    case 'memory_stats': return 'Checking memory'
-    case 'lists_catalog': return 'Checking lists'
-    case 'list_create': return `Creating list "${args.name}"`
-    case 'list_read': return `Reading "${args.name}"`
-    case 'list_add': return `Adding to "${args.name}"`
-    case 'list_supersede': return 'Updating a list item'
-    case 'list_archive': return 'Archiving a list item'
-    default: return name
   }
 }
 

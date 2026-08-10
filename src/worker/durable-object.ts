@@ -2,7 +2,8 @@ import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
   ConversationRow, MessageRow, AgentEvent, StreamPart
 } from './types'
-import { runAgent, runMemoryPass, nameThread } from './agent'
+import { runAgent, runMemoryPass } from './agent'
+import { nameConversation } from './title'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
 
@@ -11,6 +12,7 @@ interface ActiveStream {
   seq: number
   text: string
   commitLen: number // length of `text` committed by prior tool rounds (reset floor)
+  commitPartLen: number // count of `parts` committed by prior rounds (reset floor)
   tools: Array<{ id: string; name: string; label: string; result?: string }>
   parts: StreamPart[] // ordered text/tool parts, as the reply is rendered
   aborted: boolean
@@ -125,6 +127,14 @@ export class AngelDO implements DurableObject {
         await this.handleConvArchive(ws, msg.conversationId)
         break
 
+      case 'conv:unarchive':
+        await this.handleConvUnarchive(msg.conversationId)
+        break
+
+      case 'conv:rename':
+        await this.handleConvRename(msg.conversationId, msg.title)
+        break
+
       case 'conv:load':
         await this.handleConvLoad(ws, msg.conversationId)
         break
@@ -150,8 +160,9 @@ export class AngelDO implements DurableObject {
   // --- Handlers ---
 
   private async handleConvList(ws: WebSocket) {
+    // Return archived too - the client shows them in a collapsible Archived section.
     const result = await this.env.DB.prepare(
-      `SELECT * FROM conversations WHERE archived = 0 ORDER BY updated_at DESC LIMIT 50`
+      `SELECT * FROM conversations ORDER BY updated_at DESC LIMIT 100`
     ).all<ConversationRow>()
     this.send(ws, { type: 'conv:list', conversations: result.results })
   }
@@ -169,6 +180,23 @@ export class AngelDO implements DurableObject {
       `UPDATE conversations SET archived = 1 WHERE id = ?`
     ).bind(conversationId).run()
     this.broadcast({ type: 'conv:archived', conversationId })
+  }
+
+  private async handleConvUnarchive(conversationId: string) {
+    await this.env.DB.prepare(
+      `UPDATE conversations SET archived = 0 WHERE id = ?`
+    ).bind(conversationId).run()
+    this.broadcast({ type: 'conv:unarchived', conversationId })
+  }
+
+  private async handleConvRename(conversationId: string, title: string) {
+    const clean = title.trim().slice(0, 100)
+    if (!clean) return
+    // Keep topic in sync with the human label - it's what Angel sees in context.
+    await this.env.DB.prepare(
+      `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
+    ).bind(clean, clean, conversationId).run()
+    this.broadcast({ type: 'conv:title', conversationId, title: clean, topic: clean })
   }
 
   private async handleConvLoad(ws: WebSocket, conversationId: string) {
@@ -227,7 +255,7 @@ export class AngelDO implements DurableObject {
 
   private async streamResponse(conversationId: string, content: string): Promise<string> {
     const stream: ActiveStream = {
-      conversationId, seq: 0, text: '', commitLen: 0, tools: [], parts: [], aborted: false,
+      conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, tools: [], parts: [], aborted: false,
     }
     this.activeStreams.set(conversationId, stream)
     let sawDone = false
@@ -247,14 +275,19 @@ export class AngelDO implements DurableObject {
             break
           }
           case 'commit':
-            // Prior rounds' text is now final; a later reset can't roll past it.
+            // Prior rounds' text and parts are now final; a later reset can't roll past them.
             stream.commitLen = stream.text.length
+            stream.commitPartLen = stream.parts.length
             break
           case 'reset':
-            // Discard only the truncated current round's text; keep committed rounds.
+            // Discard the truncated attempt's text AND any tools it announced,
+            // back to the last committed boundary, then hand the client the truth.
             stream.text = stream.text.slice(0, stream.commitLen)
-            if (stream.parts.length && stream.parts[stream.parts.length - 1].type === 'text') stream.parts.pop()
-            this.broadcast({ type: 'stream:reset', conversationId, seq: stream.seq })
+            stream.parts = stream.parts.slice(0, stream.commitPartLen)
+            stream.tools = stream.parts
+              .filter((p): p is Extract<StreamPart, { type: 'tool' }> => p.type === 'tool')
+              .map(p => ({ id: p.id, name: p.name, label: p.label, result: p.result }))
+            this.broadcast({ type: 'stream:reset', conversationId, seq: stream.seq, parts: stream.parts })
             break
           case 'tool_start':
             stream.tools.push({ id: event.id, name: event.name, label: event.label })
@@ -271,7 +304,13 @@ export class AngelDO implements DurableObject {
           }
           case 'done':
             sawDone = true
-            await this.saveAssistant(conversationId, stream.text || '*(no response)*', stream.parts, event.usage)
+            // Drop any tool announced but never executed (a truncated tail) so a
+            // phantom spinner can't be saved into the message.
+            await this.saveAssistant(
+              conversationId, stream.text || '*(no response)*',
+              stream.parts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined)),
+              event.usage,
+            )
             this.broadcast({ type: 'done', conversationId, seq: stream.seq, usage: event.usage })
             break
           case 'error':
@@ -327,37 +366,51 @@ export class AngelDO implements DurableObject {
   }
 
   private async postStreamWork(conversationId: string, userMessage: string, assistantText: string) {
-    try {
-      // Name the thread from its first exchange. Keyed on title IS NULL so a fast
-      // follow-up can't skip titling by pushing the message count past a window.
-      const conv = await this.env.DB.prepare(
-        `SELECT title FROM conversations WHERE id = ?`
-      ).bind(conversationId).first<{ title: string | null }>()
-      // Name a conversation from its first exchange, using full context. Leave
-      // the title null if naming comes back empty, so the next exchange retries
-      // rather than sticking on a fallback.
-      if (conv && !conv.title && assistantText.trim()) {
-        const title = await nameThread(this.env)
-        if (title) {
-          await this.env.DB.prepare(
-            `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
-          ).bind(title, title, conversationId).run()
-          this.broadcast({ type: 'conv:title', conversationId, title, topic: title })
-        }
-      }
+    // Naming and memory work run in parallel - naming never delays the pyramids,
+    // and neither is on the response hot path. Both are awaited (below) only so
+    // the DO stays alive until they finish.
+    const naming = this.nameIfNeeded(conversationId, userMessage, assistantText)
+      .catch(e => console.error('[postStreamWork:naming]', e instanceof Error ? e.message : e))
 
+    const memory = (async () => {
       // The same Angel decides what to remember, then both pyramids roll up. Each
-      // step is isolated so one failure never blocks the others. LLM calls are
-      // individually timeout-bounded (llm.ts) and builds are capped per run.
+      // step is isolated so one failure never blocks the others.
       try { await runMemoryPass(this.env, conversationId) }
       catch (e) { console.error('[postStreamWork:memory-pass]', e instanceof Error ? e.message : e) }
       try { await buildObservationPyramid(this.env) }
       catch (e) { console.error('[postStreamWork:obs-pyramid]', e instanceof Error ? e.message : e) }
       try { await buildStreamPyramid(this.env) }
       catch (e) { console.error('[postStreamWork:stream-pyramid]', e instanceof Error ? e.message : e) }
-    } catch (e) {
-      console.error('[postStreamWork] failed:', e instanceof Error ? e.message : e)
-    }
+    })()
+
+    await Promise.all([naming, memory])
+  }
+
+  // Name a conversation from its first exchange (title IS NULL, keyed so a fast
+  // follow-up can't skip it). The first conversation of the day whose opening is
+  // a plain greeting is labeled with the date instead.
+  private async nameIfNeeded(conversationId: string, userMessage: string, assistantText: string) {
+    if (!assistantText.trim()) return
+    const conv = await this.env.DB.prepare(
+      `SELECT title FROM conversations WHERE id = ?`
+    ).bind(conversationId).first<{ title: string | null }>()
+    if (!conv || conv.title) return
+
+    const others = await this.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM conversations WHERE id != ? AND date(created_at) = date('now')`
+    ).bind(conversationId).first<{ n: number }>()
+    const firstOfDay = (others?.n ?? 0) === 0
+
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+    const now = new Date()
+    const dateLabel = `${MONTHS[now.getUTCMonth()]} ${now.getUTCDate()}`
+
+    const title = await nameConversation(this.env, userMessage, assistantText, { allowDate: firstOfDay, dateLabel })
+    if (!title) return // leave null so the next exchange retries
+    await this.env.DB.prepare(
+      `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
+    ).bind(title, title, conversationId).run()
+    this.broadcast({ type: 'conv:title', conversationId, title, topic: title })
   }
 
   // --- WebSocket helpers ---

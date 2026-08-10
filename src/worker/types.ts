@@ -162,6 +162,8 @@ export type ClientMsg =
   | { type: 'conv:create' }
   | { type: 'conv:list' }
   | { type: 'conv:archive'; conversationId: string }
+  | { type: 'conv:unarchive'; conversationId: string }
+  | { type: 'conv:rename'; conversationId: string; title: string }
   | { type: 'conv:load'; conversationId: string }
   | { type: 'chat'; conversationId: string; clientMsgId: string; content: string }
   | { type: 'stop'; conversationId: string }
@@ -173,6 +175,7 @@ export type ServerMsg =
   | { type: 'conv:list'; conversations: ConversationRow[] }
   | { type: 'conv:created'; conversationId: string }
   | { type: 'conv:archived'; conversationId: string }
+  | { type: 'conv:unarchived'; conversationId: string }
   | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot }
   | { type: 'conv:title'; conversationId: string; title: string; topic: string | null }
   | { type: 'msg:user'; conversationId: string; clientMsgId: string; messageId: number; content: string }
@@ -181,7 +184,7 @@ export type ServerMsg =
   | { type: 'tool_result'; conversationId: string; seq: number; id: string; result: string }
   | { type: 'done'; conversationId: string; seq: number; usage?: { input: number; output: number } }
   | { type: 'error'; conversationId: string; seq: number; message: string }
-  | { type: 'stream:reset'; conversationId: string; seq: number }
+  | { type: 'stream:reset'; conversationId: string; seq: number; parts: StreamPart[] }
 
 // Agent event types (internal, yielded by the agent loop)
 export type AgentEvent =

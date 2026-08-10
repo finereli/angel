@@ -9,6 +9,11 @@
   let currentChatId: string | null = null;
   let menuOpen = false;
   let darkMode = false;
+  let showArchived = false;
+  let editingId: string | null = null;
+  let editingText = '';
+  let appMenuOpen = false;
+  let convsLoaded = angel.hasLoadedConversations();
 
   let unsub: (() => void) | null = null;
 
@@ -24,13 +29,17 @@
     unsub = angel.subscribe(() => {
       connState = angel.getConnState();
       conversations = angel.getConversations();
+      convsLoaded = angel.hasLoadedConversations();
 
-      // Auto-select newly created conversation
+      // Land on the last conversation, or the most recent one if there's no memory of it.
       if (conversations.length > 0 && !currentChatId) {
         const last = localStorage.getItem('lastConversationId');
-        if (last && conversations.some(c => c.id === last)) {
-          currentChatId = last;
-          angel.loadConversation(last);
+        const pick = (last && conversations.some(c => c.id === last))
+          ? last
+          : conversations.find(c => !c.archived)?.id;
+        if (pick) {
+          currentChatId = pick;
+          angel.loadConversation(pick);
         }
       }
     });
@@ -74,6 +83,7 @@
 
   function selectConversation(id: string) {
     currentChatId = id;
+    editingId = null;
     angel.loadConversation(id);
     menuOpen = false;
   }
@@ -83,9 +93,52 @@
     if (currentChatId === id) currentChatId = null;
   }
 
+  function unarchiveConversation(id: string) {
+    angel.unarchiveConversation(id);
+  }
+
+  // Rename the open conversation by clicking its title in the top bar.
+  function startTitleEdit() {
+    if (!currentChatId) return;
+    const c = conversations.find(x => x.id === currentChatId);
+    editingId = currentChatId;
+    editingText = c?.title || '';
+  }
+
+  function submitRename() {
+    const t = editingText.trim();
+    if (editingId && t) angel.renameConversation(editingId, t);
+    editingId = null;
+  }
+
+  function cancelRename() { editingId = null; }
+
+  function renameKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') { e.preventDefault(); submitRename(); }
+    else if (e.key === 'Escape') { e.preventDefault(); cancelRename(); }
+  }
+
+  function focusInput(node: HTMLInputElement) { node.focus(); node.select(); }
+
   function toggleDark() {
     darkMode = !darkMode;
     applyDarkMode(darkMode);
+  }
+
+  // Nuke the service-worker cache and reload - for glitches and version updates.
+  async function hardReload() {
+    appMenuOpen = false;
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+    } catch {}
+    location.reload();
   }
 
   function relativeTime(ts: string): string {
@@ -98,6 +151,9 @@
     const days = Math.floor(hrs / 24);
     return `${days}d`;
   }
+
+  $: activeConvs = conversations.filter(c => !c.archived);
+  $: archivedConvs = conversations.filter(c => c.archived);
 
   $: needsAuth = connState === 'disconnected' && !localStorage.getItem('pin');
   $: authFailed = connState === 'disconnected' && !!localStorage.getItem('pin');
@@ -121,7 +177,7 @@
         <button class="icon-btn new" on:click={newConversation} title="New conversation">+</button>
       </div>
       <div class="conversation-list">
-        {#each conversations as conv (conv.id)}
+        {#each activeConvs as conv (conv.id)}
           <button
             class="conv-item"
             class:active={currentChatId === conv.id}
@@ -132,12 +188,42 @@
               <span class="conv-time">{relativeTime(conv.updated_at)}</span>
             </div>
             <button
-              class="archive-btn"
+              class="row-icon archive-btn"
               on:click|stopPropagation={() => archiveConversation(conv.id)}
               title="Archive"
-            >×</button>
+            >
+              <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M20.54 5.23l-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z"/></svg>
+            </button>
           </button>
         {/each}
+
+        {#if archivedConvs.length}
+          <button class="section-toggle" on:click={() => showArchived = !showArchived}>
+            <span class="caret" class:open={showArchived}>▸</span>
+            Archived ({archivedConvs.length})
+          </button>
+          {#if showArchived}
+            {#each archivedConvs as conv (conv.id)}
+              <button
+                class="conv-item archived"
+                class:active={currentChatId === conv.id}
+                on:click={() => selectConversation(conv.id)}
+              >
+                <div class="conv-info">
+                  <span class="conv-title">{conv.title || 'New conversation'}</span>
+                  <span class="conv-time">{relativeTime(conv.updated_at)}</span>
+                </div>
+                <button
+                  class="row-icon archive-btn"
+                  on:click|stopPropagation={() => unarchiveConversation(conv.id)}
+                  title="Unarchive"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M20.55 5.22l-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.15.55L3.46 5.22C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.45-1.28zM12 9.5l5.5 5.5H14v2h-4v-2H6.5L12 9.5zM5.12 5l.82-1h12l.93 1H5.12z"/></svg>
+                </button>
+              </button>
+            {/each}
+          {/if}
+        {/if}
       </div>
       <div class="sidebar-footer">
         <button class="footer-btn" on:click={toggleDark}>
@@ -153,22 +239,50 @@
         <button class="menu-btn" on:click={() => menuOpen = !menuOpen}>
           ☰
         </button>
-        <span class="app-bar-title">
-          {#if currentChatId}
-            {conversations.find(c => c.id === currentChatId)?.title || 'New conversation'}
-          {:else}
-            Angel
+        {#if editingId && editingId === currentChatId}
+          <input
+            class="title-input"
+            bind:value={editingText}
+            on:keydown={renameKeydown}
+            on:blur={cancelRename}
+            use:focusInput
+          />
+          <button class="icon-btn" on:mousedown|preventDefault={submitRename} title="Save">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+        {:else}
+          <button class="app-bar-title" class:editable={!!currentChatId} on:click={startTitleEdit} title={currentChatId ? 'Rename' : ''}>
+            {#if currentChatId}
+              {conversations.find(c => c.id === currentChatId)?.title || 'New conversation'}
+            {:else}
+              Angel
+            {/if}
+          </button>
+        {/if}
+        <div class="app-menu">
+          <button class="icon-btn kebab" on:click={() => appMenuOpen = !appMenuOpen} title="Menu">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          </button>
+          {#if appMenuOpen}
+            <div class="app-menu-dropdown">
+              <button class="app-menu-item" on:click={hardReload}>Reload</button>
+            </div>
           {/if}
-        </span>
+        </div>
       </header>
+      {#if appMenuOpen}
+        <button class="menu-scrim" on:click={() => appMenuOpen = false} aria-label="Close menu"></button>
+      {/if}
 
       {#if currentChatId}
         <Chat conversationId={currentChatId} />
-      {:else}
+      {:else if convsLoaded && conversations.length === 0}
         <div class="empty-state">
           <p>Start a new conversation</p>
           <button class="new-chat-btn" on:click={newConversation}>New conversation</button>
         </div>
+      {:else}
+        <div class="loading-state">Loading…</div>
       {/if}
     </main>
 
@@ -328,18 +442,46 @@
     color: var(--text-secondary);
   }
 
-  .archive-btn {
+  .row-icon {
     background: none;
     border: none;
     color: var(--text-secondary);
     cursor: pointer;
-    opacity: 0;
-    padding: 2px 6px;
-    font-size: 1.1rem;
+    padding: 4px;
     border-radius: 4px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
   }
+  .row-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  /* Archive reveals on hover with a pointer; on touch there's no hover, so show it. */
+  .archive-btn { opacity: 0; }
   .conv-item:hover .archive-btn { opacity: 1; }
-  .archive-btn:hover { background: var(--bg-hover); }
+  @media (hover: none) {
+    .archive-btn { opacity: 1; }
+  }
+
+  .conv-item.archived .conv-title { color: var(--text-secondary); }
+
+  .section-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 12px 12px 6px;
+    text-align: left;
+  }
+  .section-toggle:hover { color: var(--text-primary); }
+  .caret { display: inline-block; transition: transform 0.15s; }
+  .caret.open { transform: rotate(90deg); }
 
   .main {
     flex: 1;
@@ -370,12 +512,79 @@
   }
 
   .app-bar-title {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
     font-size: 0.95rem;
     font-weight: 500;
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: default;
+  }
+  .app-bar-title.editable { cursor: pointer; }
+  .app-bar-title.editable:hover { color: var(--accent); }
+
+  .title-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-input);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: inherit;
+  }
+  .title-input:focus { outline: none; }
+
+  .loading-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .app-menu { position: relative; flex-shrink: 0; }
+  .kebab { display: flex; align-items: center; justify-content: center; }
+  .app-menu-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    min-width: 140px;
+    padding: 4px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    z-index: 200;
+  }
+  .app-menu-item {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .app-menu-item:hover { background: var(--bg-hover); }
+  .menu-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    background: transparent;
+    border: none;
+    cursor: default;
   }
 
   .empty-state {

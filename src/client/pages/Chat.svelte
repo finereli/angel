@@ -230,25 +230,26 @@
     textareaEl.style.overflowY = textareaEl.scrollHeight > 168 ? 'auto' : 'hidden';
   }
 
-  function toolLabel(name: string): string {
-    const labels: Record<string, string> = {
-      record_observation: 'Noting something',
-      recall: 'Searching memory',
-      create_model: 'Creating model',
-      update_model_description: 'Updating model',
-      memory_load_model: 'Loading model',
-      memory_stats: 'Checking memory',
-      catchup: 'Loading context',
-      glopus_models: 'Browsing Glopus models',
-      glopus_load: 'Loading from Glopus',
-      lists_catalog: 'Checking lists',
-      list_create: 'Creating list',
-      list_read: 'Reading list',
-      list_add: 'Adding to list',
-      list_supersede: 'Updating item',
-      list_archive: 'Archiving item',
-    };
-    return labels[name] || name;
+  // [in-progress, done] label per tool - kind only, no description.
+  const TOOL_PHASES: Record<string, [string, string]> = {
+    record_observation: ['Recording observation', 'Recorded observation'],
+    recall: ['Searching memory', 'Searched memory'],
+    create_tag: ['Creating tag', 'Created tag'],
+    update_tag_description: ['Updating tag', 'Updated tag'],
+    list_tags: ['Reviewing tags', 'Reviewed tags'],
+    memory_stats: ['Checking memory', 'Checked memory'],
+    lists_catalog: ['Checking lists', 'Checked lists'],
+    list_create: ['Creating list', 'Created list'],
+    list_read: ['Reading list', 'Read list'],
+    list_add: ['Adding to list', 'Added to list'],
+    list_supersede: ['Updating item', 'Updated item'],
+    list_archive: ['Archiving item', 'Archived item'],
+  };
+  function toolProgress(name: string): string {
+    return TOOL_PHASES[name]?.[0] || 'Working';
+  }
+  function toolDone(name: string, fallback?: string): string {
+    return TOOL_PHASES[name]?.[1] || fallback || name;
   }
 
   function dayKey(ts: string): string {
@@ -319,7 +320,7 @@
                   {:else}
                     <div class="tool-row done" title={part.name}>
                       <svg class="tool-check" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
-                      {part.label || toolLabel(part.name)}
+                      {toolDone(part.name, part.label)}
                     </div>
                   {/if}
                 {/each}
@@ -331,7 +332,7 @@
                     {#each tools as tool}
                       <span class="tool-row done" title={tool.name}>
                         <svg class="tool-check" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
-                        {tool.label || toolLabel(tool.name)}
+                        {toolDone(tool.name, tool.label)}
                       </span>
                     {/each}
                   </div>
@@ -356,7 +357,7 @@
                   {:else}
                     <span class="tool-spinner"></span>
                   {/if}
-                  {part.label || toolLabel(part.name)}
+                  {part.result ? toolDone(part.name, part.label) : toolProgress(part.name) + '…'}
                 </div>
               {/if}
             {/each}
@@ -392,10 +393,6 @@
       </div>
     {/if}
     <div class="input-wrap">
-      <input type="file" multiple bind:this={fileInputEl} on:change={handleFileSelect} style="display:none" />
-      <button class="attach-btn" on:click={() => fileInputEl.click()} disabled={streaming} title="Attach a text file">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-      </button>
       <textarea
         bind:this={textareaEl}
         bind:value={messageText}
@@ -405,19 +402,26 @@
         placeholder="Message Angel..."
         rows="1"
       ></textarea>
-      {#if streaming}
-        <button class="send-btn stop" on:click={stopStream} title="Stop">
-          <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+      <div class="composer-actions">
+        <input type="file" multiple bind:this={fileInputEl} on:change={handleFileSelect} style="display:none" />
+        <button class="attach-btn" on:click={() => fileInputEl.click()} disabled={streaming} title="Attach a text file">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
-      {:else}
-        <button
-          class="send-btn"
-          on:click={sendMessage}
-          disabled={!messageText.trim() && attachments.length === 0}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
-        </button>
-      {/if}
+        <div class="composer-spacer"></div>
+        {#if streaming}
+          <button class="send-btn stop" on:click={stopStream} title="Stop">
+            <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+          </button>
+        {:else}
+          <button
+            class="send-btn"
+            on:click={sendMessage}
+            disabled={!messageText.trim() && attachments.length === 0}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </button>
+        {/if}
+      </div>
     </div>
   </div>
 </div>
@@ -489,6 +493,10 @@
     background: var(--accent);
     color: white;
     border-bottom-right-radius: 2px;
+  }
+  /* pre-wrap on the text itself, NOT the container - otherwise the template's
+     own newlines between elements render as blank lines around the message. */
+  .message.user .message-content {
     white-space: pre-wrap;
   }
 
@@ -621,9 +629,16 @@
 
   .input-wrap {
     display: flex;
+    flex-direction: column;
     gap: 8px;
-    align-items: flex-end;
   }
+
+  .composer-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .composer-spacer { flex: 1; }
 
   .attach-chips {
     display: flex;
@@ -729,7 +744,7 @@
   }
 
   textarea {
-    flex: 1;
+    width: 100%;
     resize: none;
     border: 1px solid var(--border);
     border-radius: 16px;
