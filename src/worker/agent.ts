@@ -1,5 +1,5 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
-import { chatCompletionStream } from './llm'
+import { chatCompletionStream, chatCompletion } from './llm'
 import { getToolDefinitions, executeTool } from './tools'
 import { OPERATING_NOTES } from './identity'
 import { buildListsPreamble } from './lists'
@@ -221,6 +221,29 @@ export async function runMemoryPass(env: Env, conversationId: string): Promise<v
       catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
+  }
+}
+
+// Name a freshly-started tangent. A small call, but with the FULL assembled
+// context (recap + verbatim), the same material the memory pass sees - so the
+// title reflects what we're actually on, not a guess from a truncated first line.
+export async function nameThread(env: Env): Promise<string | null> {
+  const { tiles, verbatim } = await renderStreamContext(env)
+  const messages: ChatMessage[] = [
+    ...recapTurns(tiles),
+    ...verbatimTurns(verbatim),
+    {
+      role: 'user',
+      content: "(naming) In 3 to 6 words, name the thread we just started - what this conversation is about, judging from the latest exchange. Reply with only the title: no quotes, no trailing period, no preamble.",
+    },
+  ]
+  try {
+    const res = await chatCompletion(env, messages, { temperature: 0.3, max_tokens: 24 })
+    const title = (res.content || '').trim().replace(/^["']+|["']+$/g, '').replace(/[.]+$/, '').trim()
+    return title || null
+  } catch (e) {
+    console.error('[nameThread]', e instanceof Error ? e.message : e)
+    return null
   }
 }
 

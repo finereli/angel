@@ -412,19 +412,41 @@ class AngelClient {
 
   private startPing() {
     this.stopPing()
+    // Tighter heartbeat: a silent drop surfaces in ~15s worst case instead of ~35s.
     this.pingInterval = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.send({ type: 'ping', ts: Date.now() })
-        this.pongTimeout = setTimeout(() => {
-          this.ws?.close()
-        }, 10_000)
+        if (!this.pongTimeout) {
+          this.pongTimeout = setTimeout(() => {
+            this.pongTimeout = null
+            this.ws?.close()
+          }, 5_000)
+        }
       }
-    }, 25_000)
+    }, 10_000)
   }
 
   private stopPing() {
     if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null }
     if (this.pongTimeout) { clearTimeout(this.pongTimeout); this.pongTimeout = null }
+  }
+
+  // The browser knows the network died before any heartbeat can: reflect it instantly.
+  private handleOffline() {
+    if (this.connState === 'connected' || this.connState === 'connecting' || this.connState === 'authenticating') {
+      this.connState = 'reconnecting'
+      this.stopPing()
+      if (this.ws) { try { this.ws.close() } catch {} this.ws = null }
+      this.notify()
+    }
+  }
+
+  private handleOnline() {
+    if (this.pin && this.connState !== 'connected' && this.connState !== 'connecting' && this.connState !== 'authenticating') {
+      this.clearReconnectTimer()
+      this.reconnectDelay = 1000
+      this.doConnect()
+    }
   }
 }
 
@@ -450,4 +472,10 @@ if (typeof document !== 'undefined') {
       angel['doConnect']()
     }
   })
+}
+
+// Network up/down: the fastest possible signal, faster than any heartbeat.
+if (typeof window !== 'undefined') {
+  window.addEventListener('offline', () => angel['handleOffline']())
+  window.addEventListener('online', () => angel['handleOnline']())
 }

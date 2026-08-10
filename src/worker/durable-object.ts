@@ -2,8 +2,7 @@ import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
   ConversationRow, MessageRow, AgentEvent, StreamPart
 } from './types'
-import { runAgent, runMemoryPass } from './agent'
-import { generateTitle } from './title'
+import { runAgent, runMemoryPass, nameThread } from './agent'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
 
@@ -334,12 +333,17 @@ export class AngelDO implements DurableObject {
       const conv = await this.env.DB.prepare(
         `SELECT title FROM conversations WHERE id = ?`
       ).bind(conversationId).first<{ title: string | null }>()
+      // Name a conversation from its first exchange, using full context. Leave
+      // the title null if naming comes back empty, so the next exchange retries
+      // rather than sticking on a fallback.
       if (conv && !conv.title && assistantText.trim()) {
-        const title = await generateTitle(this.env, userMessage, assistantText)
-        await this.env.DB.prepare(
-          `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
-        ).bind(title, title, conversationId).run()
-        this.broadcast({ type: 'conv:title', conversationId, title, topic: title })
+        const title = await nameThread(this.env)
+        if (title) {
+          await this.env.DB.prepare(
+            `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
+          ).bind(title, title, conversationId).run()
+          this.broadcast({ type: 'conv:title', conversationId, title, topic: title })
+        }
       }
 
       // The same Angel decides what to remember, then both pyramids roll up. Each

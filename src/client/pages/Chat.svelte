@@ -90,6 +90,17 @@
     attachments = attachments.filter((_, idx) => idx !== i);
   }
 
+  function attachMeta(a: Attachment): string {
+    const lines = a.text.split('\n').length;
+    return `${a.name} · ${lines} line${lines === 1 ? '' : 's'} · ${a.text.length} chars`;
+  }
+
+  function attachPreview(text: string): string {
+    let p = text.split('\n').slice(0, 8).join('\n');
+    if (p.length > 600) p = p.slice(0, 600) + '…';
+    return p;
+  }
+
   function buildContent(): string {
     const blocks = attachments.map(a => `<attached-file name="${a.name}">\n${a.text}\n</attached-file>`);
     return [...blocks, messageText.trim()].filter(Boolean).join('\n\n');
@@ -240,6 +251,20 @@
     return labels[name] || name;
   }
 
+  function dayKey(ts: string): string {
+    return new Date(ts).toDateString();
+  }
+
+  function dateLabel(ts: string): string {
+    const d = new Date(ts);
+    const today = new Date();
+    const yest = new Date();
+    yest.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
   function relativeTime(ts: string): string {
     const diff = Date.now() - new Date(ts).getTime();
     const mins = Math.floor(diff / 60000);
@@ -263,7 +288,10 @@
 
   <div class="messages" bind:this={messagesEl} on:scroll={handleScroll}>
     {#if convState}
-      {#each convState.messages as msg (msg.id)}
+      {#each convState.messages as msg, i (msg.id)}
+        {#if i === 0 || dayKey(msg.created_at) !== dayKey(convState.messages[i - 1].created_at)}
+          <div class="date-line"><span>{dateLabel(msg.created_at)}</span></div>
+        {/if}
         {#if msg.role === 'user'}
           {@const uc = parseUserContent(msg.content)}
           <div class="message user">
@@ -351,14 +379,15 @@
       <div class="attach-error">{attachError}</div>
     {/if}
     {#if attachments.length}
-      <div class="attach-chips pending">
+      <div class="attach-cards">
         {#each attachments as a, i}
-          <span class="attach-chip">
-            <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M4 1.5A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h8a1.5 1.5 0 0 0 1.5-1.5V6L9 1.5H4z"/></svg>
-            {a.name}
-            <span class="chip-size">{Math.max(1, Math.round(a.size / 1024))} KB</span>
-            <button class="chip-x" on:click={() => removeAttachment(i)} title="Remove">×</button>
-          </span>
+          <div class="attach-card">
+            <div class="attach-card-head">
+              <span class="attach-card-meta">{attachMeta(a)}</span>
+              <button class="chip-x" on:click={() => removeAttachment(i)} title="Remove">×</button>
+            </div>
+            <pre class="attach-card-preview">{attachPreview(a.text)}</pre>
+          </div>
         {/each}
       </div>
     {/if}
@@ -431,6 +460,22 @@
     font-size: 1rem;
     line-height: 1.5;
     word-wrap: break-word;
+  }
+
+  .date-line {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 4px 0;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+  }
+  .date-line::before,
+  .date-line::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
   }
 
   @media (min-width: 1024px) {
@@ -578,8 +623,6 @@
     display: flex;
     gap: 8px;
     align-items: flex-end;
-    max-width: 48rem;
-    margin: 0 auto;
   }
 
   .attach-chips {
@@ -587,9 +630,44 @@
     flex-wrap: wrap;
     gap: 6px;
   }
-  .attach-chips.pending {
-    max-width: 48rem;
-    margin: 0 auto 8px;
+
+  /* Pending attachment/paste preview cards */
+  .attach-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .attach-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-code);
+    padding: 10px 12px;
+  }
+  .attach-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  }
+  .attach-card-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .attach-card-preview {
+    margin: 8px 0 0;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 7.2em;
+    overflow: hidden;
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
   }
   .attach-chip {
     display: inline-flex;
@@ -609,10 +687,6 @@
     border-color: rgba(255, 255, 255, 0.25);
     margin-bottom: 6px;
   }
-  .chip-size {
-    opacity: 0.6;
-    font-variant-numeric: tabular-nums;
-  }
   .chip-x {
     border: none;
     background: none;
@@ -626,8 +700,7 @@
   .chip-x:hover { opacity: 1; }
 
   .attach-error {
-    max-width: 48rem;
-    margin: 0 auto 8px;
+    margin: 0 0 8px;
     font-size: 0.78rem;
     color: #ef4444;
   }

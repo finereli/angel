@@ -59,16 +59,15 @@
   }
 
   function newConversation() {
+    const before = new Set(angel.getConversations().map(c => c.id));
     angel.createConversation();
-    // The conv:created event will add it to the list;
-    // we set currentChatId when the event arrives
-    const convUnsub = angel.subscribe(() => {
-      const convs = angel.getConversations();
-      if (convs.length > 0 && convs[0].id !== currentChatId) {
-        currentChatId = convs[0].id;
-        angel.loadConversation(convs[0].id);
+    const off = angel.subscribe(() => {
+      const fresh = angel.getConversations().find(c => !before.has(c.id));
+      if (fresh) {
+        currentChatId = fresh.id;
+        angel.loadConversation(fresh.id);
         menuOpen = false;
-        convUnsub();
+        off();
       }
     });
   }
@@ -111,21 +110,16 @@
     <!-- Sidebar -->
     <aside class="sidebar" class:open={menuOpen}>
       <div class="sidebar-header">
-        <h1>Angel</h1>
-        <div class="header-actions">
-          {#if connState === 'reconnecting' || connState === 'connecting'}
-            <span class="status-dot reconnecting" title="Reconnecting..."></span>
-          {:else if connState === 'connected'}
+        <div class="brand">
+          <h1>Angel</h1>
+          {#if connState === 'connected'}
             <span class="status-dot connected" title="Connected"></span>
+          {:else}
+            <span class="status-dot reconnecting" title="Connecting…"></span>
           {/if}
-          <button class="icon-btn" on:click={toggleDark} title="Toggle dark mode">
-            {#if darkMode}☀{:else}☾{/if}
-          </button>
         </div>
+        <button class="icon-btn new" on:click={newConversation} title="New conversation">+</button>
       </div>
-      <button class="new-chat-btn" on:click={newConversation}>
-        New conversation
-      </button>
       <div class="conversation-list">
         {#each conversations as conv (conv.id)}
           <button
@@ -144,6 +138,12 @@
             >×</button>
           </button>
         {/each}
+      </div>
+      <div class="sidebar-footer">
+        <button class="footer-btn" on:click={toggleDark}>
+          <span class="footer-icon">{#if darkMode}☀{:else}☾{/if}</span>
+          <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>
+        </button>
       </div>
     </aside>
 
@@ -210,11 +210,43 @@
     color: var(--text-primary);
   }
 
-  .header-actions {
+  .brand {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
   }
+
+  .icon-btn.new {
+    font-size: 1.5rem;
+    line-height: 1;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sidebar-footer {
+    border-top: 1px solid var(--border);
+    padding: 8px;
+  }
+  .footer-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    text-align: left;
+  }
+  .footer-btn:hover { background: var(--bg-hover); }
+  .footer-icon { width: 1.2em; text-align: center; }
 
   .status-dot {
     width: 8px;
@@ -252,7 +284,7 @@
   .conversation-list {
     flex: 1;
     overflow-y: auto;
-    padding: 0 8px;
+    padding: 8px;
   }
 
   .conv-item {
