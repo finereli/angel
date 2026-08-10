@@ -13,6 +13,99 @@
   let convState: ConversationState;
   let userHasScrolledUp = false;
 
+  // Text attachments: read client-side, inlined into the message, bytes discarded.
+  // No upload, no storage - the file's text becomes part of what Angel reads. A
+  // big file still dumps into context; that's the current behavior we're keeping.
+  const MAX_ATTACH_BYTES = 100 * 1024; // 100 KB per file
+  // Paste over either threshold becomes an attachment instead of flooding the box.
+  const PASTE_ATTACH_CHARS = 600;
+  const PASTE_ATTACH_LINES = 8;
+  const TEXT_EXTS = new Set([
+    '.txt', '.md', '.markdown', '.csv', '.tsv', '.json', '.jsonl', '.yaml', '.yml',
+    '.toml', '.xml', '.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.go', '.rs', '.java',
+    '.c', '.h', '.cpp', '.cs', '.php', '.swift', '.kt', '.sh', '.bash', '.zsh', '.sql',
+    '.html', '.css', '.scss', '.svelte', '.vue', '.log', '.diff', '.patch', '.env',
+    '.ini', '.conf', '.cfg',
+  ]);
+
+  interface Attachment { name: string; size: number; text: string }
+  let attachments: Attachment[] = [];
+  let fileInputEl: HTMLInputElement;
+  let attachError = '';
+
+  function isTextFile(name: string, type: string): boolean {
+    const dot = name.lastIndexOf('.');
+    const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
+    if (TEXT_EXTS.has(ext)) return true;
+    if (type && (type.startsWith('text/') || type === 'application/json' || type === 'application/xml' || type.includes('yaml'))) return true;
+    return false;
+  }
+
+  async function addFiles(files: File[]) {
+    attachError = '';
+    for (const file of files) {
+      if (!isTextFile(file.name, file.type)) {
+        attachError = `${file.name}: text files only for now (images and PDFs come later)`;
+        continue;
+      }
+      if (file.size > MAX_ATTACH_BYTES) {
+        attachError = `${file.name} is too big - ${Math.round(file.size / 1024)} KB, max ${Math.round(MAX_ATTACH_BYTES / 1024)} KB`;
+        continue;
+      }
+      let text: string;
+      try { text = await file.text(); } catch { attachError = `Couldn't read ${file.name}`; continue; }
+      if (text.includes('\u0000')) { attachError = `${file.name} looks binary, skipping`; continue; }
+      attachments = [...attachments, { name: file.name.replace(/"/g, ''), size: file.size, text }];
+    }
+  }
+
+  function handleFileSelect(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (input.files?.length) addFiles(Array.from(input.files));
+    input.value = '';
+  }
+
+  function addPastedText(text: string) {
+    attachError = '';
+    const bytes = new Blob([text]).size;
+    if (bytes > MAX_ATTACH_BYTES) {
+      attachError = `That paste is large - ${Math.round(bytes / 1024)} KB, max ${Math.round(MAX_ATTACH_BYTES / 1024)} KB. Attach it as a file instead.`;
+      return;
+    }
+    const n = attachments.filter(a => a.name.startsWith('Pasted text')).length;
+    attachments = [...attachments, { name: n === 0 ? 'Pasted text' : `Pasted text ${n + 1}`, size: bytes, text }];
+  }
+
+  // Short pastes drop into the box as usual; long ones become an attachment.
+  function handlePaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData('text/plain') ?? '';
+    if (!text) return;
+    if (text.length >= PASTE_ATTACH_CHARS || text.split('\n').length >= PASTE_ATTACH_LINES) {
+      e.preventDefault();
+      addPastedText(text);
+    }
+  }
+
+  function removeAttachment(i: number) {
+    attachments = attachments.filter((_, idx) => idx !== i);
+  }
+
+  function buildContent(): string {
+    const blocks = attachments.map(a => `<attached-file name="${a.name}">\n${a.text}\n</attached-file>`);
+    return [...blocks, messageText.trim()].filter(Boolean).join('\n\n');
+  }
+
+  // Pull attached-file blocks back out for display so the transcript shows a chip,
+  // not the whole dumped file.
+  function parseUserContent(content: string): { files: string[]; text: string } {
+    const files: string[] = [];
+    const text = content
+      .replace(/<attached-file name="([^"]*)">\n?[\s\S]*?\n?<\/attached-file>/g, (_m, name) => { files.push(name); return ''; })
+      .replace(/^\n+/, '')
+      .trim();
+    return { files, text };
+  }
+
   const renderer = new marked.Renderer();
   renderer.link = ({ href, title, text }) => {
     const titleAttr = title ? ` title="${title}"` : '';
@@ -100,10 +193,12 @@
   }
 
   function sendMessage() {
-    const text = messageText.trim();
-    if (!text || streaming) return;
-    angel.sendChat(conversationId, text);
+    if (streaming) return;
+    if (!messageText.trim() && attachments.length === 0) return;
+    angel.sendChat(conversationId, buildContent());
     messageText = '';
+    attachments = [];
+    attachError = '';
     localStorage.removeItem(`angel-draft-${conversationId}`);
     userHasScrolledUp = false;
     tick().then(() => {
@@ -170,8 +265,19 @@
     {#if convState}
       {#each convState.messages as msg (msg.id)}
         {#if msg.role === 'user'}
+          {@const uc = parseUserContent(msg.content)}
           <div class="message user">
-            <div class="message-content">{msg.content}</div>
+            {#if uc.files.length}
+              <div class="attach-chips">
+                {#each uc.files as fname}
+                  <span class="attach-chip">
+                    <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M4 1.5A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h8a1.5 1.5 0 0 0 1.5-1.5V6L9 1.5H4z"/></svg>
+                    {fname}
+                  </span>
+                {/each}
+              </div>
+            {/if}
+            {#if uc.text}<div class="message-content">{uc.text}</div>{/if}
           </div>
         {:else if msg.role === 'assistant'}
           <div class="message assistant">
@@ -241,11 +347,31 @@
   </div>
 
   <div class="input-area">
+    {#if attachError}
+      <div class="attach-error">{attachError}</div>
+    {/if}
+    {#if attachments.length}
+      <div class="attach-chips pending">
+        {#each attachments as a, i}
+          <span class="attach-chip">
+            <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M4 1.5A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h8a1.5 1.5 0 0 0 1.5-1.5V6L9 1.5H4z"/></svg>
+            {a.name}
+            <span class="chip-size">{Math.max(1, Math.round(a.size / 1024))} KB</span>
+            <button class="chip-x" on:click={() => removeAttachment(i)} title="Remove">×</button>
+          </span>
+        {/each}
+      </div>
+    {/if}
     <div class="input-wrap">
+      <input type="file" multiple bind:this={fileInputEl} on:change={handleFileSelect} style="display:none" />
+      <button class="attach-btn" on:click={() => fileInputEl.click()} disabled={streaming} title="Attach a text file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
       <textarea
         bind:this={textareaEl}
         bind:value={messageText}
         on:keydown={handleKeydown}
+        on:paste={handlePaste}
         on:input={() => { autoResize(); saveDraft(); }}
         placeholder="Message Angel..."
         rows="1"
@@ -258,7 +384,7 @@
         <button
           class="send-btn"
           on:click={sendMessage}
-          disabled={!messageText.trim()}
+          disabled={!messageText.trim() && attachments.length === 0}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
         </button>
@@ -454,6 +580,79 @@
     align-items: flex-end;
     max-width: 48rem;
     margin: 0 auto;
+  }
+
+  .attach-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .attach-chips.pending {
+    max-width: 48rem;
+    margin: 0 auto 8px;
+  }
+  .attach-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    background: var(--bg-code);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    max-width: 100%;
+  }
+  .message.user .attach-chip {
+    background: rgba(255, 255, 255, 0.18);
+    color: white;
+    border-color: rgba(255, 255, 255, 0.25);
+    margin-bottom: 6px;
+  }
+  .chip-size {
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip-x {
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0 0 2px;
+    opacity: 0.6;
+  }
+  .chip-x:hover { opacity: 1; }
+
+  .attach-error {
+    max-width: 48rem;
+    margin: 0 auto 8px;
+    font-size: 0.78rem;
+    color: #ef4444;
+  }
+
+  .attach-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: color 0.15s, background 0.15s;
+  }
+  .attach-btn:not(:disabled):hover {
+    color: var(--accent);
+    background: var(--bg-code);
+  }
+  .attach-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   textarea {
