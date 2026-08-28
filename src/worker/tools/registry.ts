@@ -4,6 +4,7 @@ import { listTools } from './lists'
 import { documentTools } from './documents'
 import { webTools } from './web'
 import { utilTools } from './util'
+import { chatroomTools } from './chatroom'
 
 export interface Tool {
   def: ToolDefinition
@@ -17,6 +18,7 @@ const ALL_TOOLS: Tool[] = [
   ...listTools,
   ...documentTools,
   ...utilTools,
+  ...chatroomTools,
 ]
 
 const byName = new Map(ALL_TOOLS.map(t => [t.def.function.name, t]))
