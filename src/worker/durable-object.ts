@@ -35,6 +35,8 @@ export class AngelDO implements DurableObject {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
+    // On construction (DO wake), recalculate the alarm in case one is pending.
+    this.state.blockConcurrencyWhile(() => this.syncAlarm())
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -221,6 +223,8 @@ export class AngelDO implements DurableObject {
     this.memoryChain = memLink.then(() => {}, () => {})
     try { await memLink }
     catch (e) { console.error('[handleChat] memory failed:', e instanceof Error ? e.message : e) }
+
+    await this.syncAlarm()
   }
 
   private async streamResponse(conversationId: string, agentId: string, agentName: string, content: string): Promise<string> {
@@ -386,6 +390,76 @@ export class AngelDO implements DurableObject {
       created_at: new Date().toISOString(),
     }
     this.broadcast({ type: 'room:new', message: msg })
+  }
+
+  // --- Alarm: agent wake-ups ---
+
+  private async syncAlarm(): Promise<void> {
+    const next = await this.env.DB.prepare(
+      `SELECT wake_at FROM agent_wakeups ORDER BY wake_at ASC LIMIT 1`
+    ).first<{ wake_at: string }>()
+    if (next) {
+      const when = new Date(next.wake_at + 'Z')
+      const current = await this.state.storage.getAlarm()
+      if (!current || Math.abs(when.getTime() - current) > 30_000) {
+        await this.state.storage.setAlarm(when)
+      }
+    } else {
+      await this.state.storage.deleteAlarm()
+    }
+  }
+
+  async alarm(): Promise<void> {
+    const now = new Date().toISOString()
+    const due = await this.env.DB.prepare(
+      `SELECT w.agent_id, w.reason, a.name as agent_name, c.id as conversation_id
+       FROM agent_wakeups w
+       JOIN agents a ON a.id = w.agent_id
+       JOIN conversations c ON c.agent_id = w.agent_id
+       WHERE w.wake_at <= ?
+       ORDER BY w.wake_at ASC`
+    ).bind(now).all<{ agent_id: string; reason: string | null; agent_name: string; conversation_id: string }>()
+
+    for (const row of due.results) {
+      await this.env.DB.prepare(
+        `DELETE FROM agent_wakeups WHERE agent_id = ?`
+      ).bind(row.agent_id).run()
+
+      const reason = row.reason || 'scheduled check-in'
+      const sysContent = `<system>Wake up — ${reason}</system>`
+
+      const result = await this.env.DB.prepare(
+        `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
+      ).bind(row.conversation_id, sysContent).run()
+      await this.env.DB.prepare(
+        `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
+      ).bind(row.conversation_id).run()
+
+      this.broadcast({
+        type: 'msg:user',
+        conversationId: row.conversation_id,
+        clientMsgId: `wakeup-${row.agent_id}-${Date.now()}`,
+        messageId: result.meta.last_row_id,
+        content: sysContent,
+      })
+
+      const respLink = this.responseChain.then(
+        () => this.streamResponse(row.conversation_id, row.agent_id, row.agent_name, sysContent)
+      )
+      this.responseChain = respLink.then(() => {}, () => {})
+      let assistantText = ''
+      try { assistantText = await respLink }
+      catch (e) { console.error('[alarm] response failed:', e instanceof Error ? e.message : e) }
+
+      const memLink = this.memoryChain.then(
+        () => this.postStreamWork(row.conversation_id, row.agent_id, row.agent_name, sysContent, assistantText)
+      )
+      this.memoryChain = memLink.then(() => {}, () => {})
+      try { await memLink }
+      catch (e) { console.error('[alarm] memory failed:', e instanceof Error ? e.message : e) }
+    }
+
+    await this.syncAlarm()
   }
 
   // --- WebSocket helpers ---

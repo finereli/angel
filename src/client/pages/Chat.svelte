@@ -331,7 +331,12 @@
         {#if i === 0 || dayKey(msg.created_at) !== dayKey(convState.messages[i - 1].created_at)}
           <div class="date-line"><span>{dateLabel(msg.created_at)}</span></div>
         {/if}
-        {#if msg.role === 'user'}
+        {#if msg.role === 'user' && msg.content.startsWith('<system>')}
+          <div class="message system">
+            <span class="system-text">{msg.content.replace(/<\/?system>/g, '')}</span>
+            <span class="system-time">{new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+          </div>
+        {:else if msg.role === 'user'}
           {@const uc = parseUserContent(msg.content)}
           <div class="message user">
             {#if uc.files.length || uc.docs.length}
@@ -554,6 +559,26 @@
     .message {
       max-width: 70%;
     }
+  }
+
+  .message.system {
+    align-self: center;
+    background: none;
+    padding: 4px 12px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+  }
+  .system-text {
+    font-style: italic;
+  }
+  .system-time {
+    opacity: 0.6;
+    font-size: 0.75rem;
+    white-space: nowrap;
   }
 
   .message.user {
