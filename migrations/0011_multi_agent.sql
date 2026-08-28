@@ -3,6 +3,21 @@
 -- D1 enforces FK constraints and ignores PRAGMA foreign_keys, so we drop child
 -- tables before parents, back up data, recreate with new schema, restore.
 
+-- 0. Safety snapshots: permanent copies of every table we'll recreate.
+--    These survive the migration. Drop manually once verified:
+--    DROP TABLE _pre_multi_tags; DROP TABLE _pre_multi_observation_tags;
+--    DROP TABLE _pre_multi_observation_summaries; DROP TABLE _pre_multi_summary_sources;
+--    DROP TABLE _pre_multi_lists; DROP TABLE _pre_multi_list_items;
+--    DROP TABLE _pre_multi_system_doc; DROP TABLE _pre_multi_conversations;
+CREATE TABLE _pre_multi_conversations AS SELECT * FROM conversations;
+CREATE TABLE _pre_multi_tags AS SELECT * FROM tags;
+CREATE TABLE _pre_multi_observation_tags AS SELECT * FROM observation_tags;
+CREATE TABLE _pre_multi_observation_summaries AS SELECT * FROM observation_summaries;
+CREATE TABLE _pre_multi_summary_sources AS SELECT * FROM summary_sources;
+CREATE TABLE _pre_multi_lists AS SELECT * FROM lists;
+CREATE TABLE _pre_multi_list_items AS SELECT * FROM list_items;
+CREATE TABLE _pre_multi_system_doc AS SELECT * FROM system_doc;
+
 -- 1. Agents table
 CREATE TABLE agents (
   id TEXT PRIMARY KEY,
