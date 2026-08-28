@@ -156,6 +156,13 @@ export interface StreamSnapshot {
   parts: StreamPart[] // ordered text/tool parts for interleaved reconnect rendering
 }
 
+export interface ChatroomMessageRow {
+  id: number
+  author: string
+  content: string
+  created_at: string
+}
+
 export type ClientMsg =
   | { type: 'auth'; pin: string }
   | { type: 'ping'; ts: number }
@@ -168,6 +175,8 @@ export type ClientMsg =
   | { type: 'chat'; conversationId: string; clientMsgId: string; content: string }
   | { type: 'doc:add'; conversationId: string; clientDocId: string; title: string; content: string }
   | { type: 'stop'; conversationId: string }
+  | { type: 'room:load'; since?: string }
+  | { type: 'room:post'; content: string }
 
 export type ServerMsg =
   | { type: 'auth:ok'; activeStreams: StreamSnapshot[] }
@@ -187,6 +196,8 @@ export type ServerMsg =
   | { type: 'error'; conversationId: string; seq: number; message: string }
   | { type: 'stream:reset'; conversationId: string; seq: number; parts: StreamPart[] }
   | { type: 'doc:added'; conversationId: string; clientDocId: string; id: string; title: string; lineCount: number }
+  | { type: 'room:messages'; messages: ChatroomMessageRow[] }
+  | { type: 'room:new'; message: ChatroomMessageRow }
 
 // Agent event types (internal, yielded by the agent loop)
 export type AgentEvent =

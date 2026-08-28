@@ -3,6 +3,7 @@
   import { angel } from './streamManager';
   import Login from './pages/Login.svelte';
   import Chat from './pages/Chat.svelte';
+  import Chatroom from './pages/Chatroom.svelte';
 
   let connState = angel.getConnState();
   let conversations = angel.getConversations();
@@ -14,6 +15,8 @@
   let editingText = '';
   let appMenuOpen = false;
   let convsLoaded = angel.hasLoadedConversations();
+  type View = 'chat' | 'room';
+  let view: View = 'chat';
 
   let unsub: (() => void) | null = null;
 
@@ -176,7 +179,11 @@
         </div>
         <button class="icon-btn new" on:click={newConversation} title="New conversation">+</button>
       </div>
-      <div class="conversation-list">
+      <div class="view-tabs">
+        <button class="view-tab" class:active={view === 'chat'} on:click={() => view = 'chat'}>Threads</button>
+        <button class="view-tab" class:active={view === 'room'} on:click={() => { view = 'room'; menuOpen = false; }}>Chatroom</button>
+      </div>
+      <div class="conversation-list" class:hidden={view !== 'chat'}>
         {#each activeConvs as conv (conv.id)}
           <button
             class="conv-item"
@@ -251,8 +258,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><polyline points="20 6 9 17 4 12"/></svg>
           </button>
         {:else}
-          <button class="app-bar-title" class:editable={!!currentChatId} on:click={startTitleEdit} title={currentChatId ? 'Rename' : ''}>
-            {#if currentChatId}
+          <button class="app-bar-title" class:editable={view === 'chat' && !!currentChatId} on:click={startTitleEdit} title={currentChatId && view === 'chat' ? 'Rename' : ''}>
+            {#if view === 'room'}
+              Chatroom
+            {:else if currentChatId}
               {conversations.find(c => c.id === currentChatId)?.title || 'New conversation'}
             {:else}
               Angel
@@ -274,7 +283,9 @@
         <button class="menu-scrim" on:click={() => appMenuOpen = false} aria-label="Close menu"></button>
       {/if}
 
-      {#if currentChatId}
+      {#if view === 'room'}
+        <Chatroom />
+      {:else if currentChatId}
         <Chat conversationId={currentChatId} />
       {:else if convsLoaded && conversations.length === 0}
         <div class="empty-state">
@@ -340,6 +351,30 @@
     align-items: center;
     justify-content: center;
   }
+
+  .view-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+  .view-tab {
+    flex: 1;
+    padding: 8px 0;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .view-tab:hover { color: var(--text-primary); }
+  .view-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .hidden { display: none; }
 
   .sidebar-footer {
     border-top: 1px solid var(--border);

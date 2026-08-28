@@ -1,6 +1,7 @@
 import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
-  ConversationRow, MessageRow, AgentEvent, StreamPart
+  ConversationRow, MessageRow, AgentEvent, StreamPart,
+  ChatroomMessageRow,
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
 import { nameConversation } from './title'
@@ -150,6 +151,14 @@ export class AngelDO implements DurableObject {
 
       case 'stop':
         this.handleStop(msg.conversationId)
+        break
+
+      case 'room:load':
+        await this.handleRoomLoad(ws, msg.since)
+        break
+
+      case 'room:post':
+        await this.handleRoomPost(msg.content)
         break
     }
   }
@@ -428,6 +437,38 @@ export class AngelDO implements DurableObject {
       `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
     ).bind(title, title, conversationId).run()
     this.broadcast({ type: 'conv:title', conversationId, title, topic: title })
+  }
+
+  // --- Chatroom ---
+
+  private async handleRoomLoad(ws: WebSocket, since?: string) {
+    let rows
+    if (since) {
+      rows = await this.env.DB.prepare(
+        `SELECT id, author, content, created_at FROM chatroom_messages WHERE created_at > ? ORDER BY created_at ASC LIMIT 200`
+      ).bind(since).all<ChatroomMessageRow>()
+    } else {
+      rows = await this.env.DB.prepare(
+        `SELECT id, author, content, created_at FROM chatroom_messages ORDER BY created_at DESC LIMIT 100`
+      ).all<ChatroomMessageRow>()
+      if (rows.results) rows.results.reverse()
+    }
+    this.send(ws, { type: 'room:messages', messages: rows.results || [] })
+  }
+
+  private async handleRoomPost(content: string) {
+    const clean = content.trim()
+    if (!clean) return
+    const result = await this.env.DB.prepare(
+      `INSERT INTO chatroom_messages (author, content) VALUES (?, ?)`
+    ).bind('eli', clean).run()
+    const msg: ChatroomMessageRow = {
+      id: result.meta.last_row_id,
+      author: 'eli',
+      content: clean,
+      created_at: new Date().toISOString(),
+    }
+    this.broadcast({ type: 'room:new', message: msg })
   }
 
   // --- WebSocket helpers ---

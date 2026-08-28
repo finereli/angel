@@ -1,5 +1,6 @@
 import type {
-  ClientMsg, ServerMsg, ConversationRow, MessageRow, StreamSnapshot
+  ClientMsg, ServerMsg, ConversationRow, MessageRow, StreamSnapshot,
+  ChatroomMessageRow,
 } from '../worker/types'
 
 export type ConnState = 'disconnected' | 'connecting' | 'authenticating' | 'connected' | 'reconnecting'
@@ -22,6 +23,7 @@ export interface ConversationState {
 type Listener = () => void
 export interface DocAdded { conversationId: string; clientDocId: string; id: string; title: string; lineCount: number }
 type DocListener = (d: DocAdded) => void
+type RoomListener = () => void
 
 let nextMsgKey = -1
 
@@ -33,6 +35,8 @@ class AngelClient {
   private convStates = new Map<string, ConversationState>()
   private listeners = new Set<Listener>()
   private docListeners = new Set<DocListener>()
+  private roomListeners = new Set<RoomListener>()
+  private roomMessages: ChatroomMessageRow[] = []
   private reconnectDelay = 1000
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingInterval: ReturnType<typeof setInterval> | null = null
@@ -43,6 +47,7 @@ class AngelClient {
   getConnState(): ConnState { return this.connState }
   getConversations(): ConversationRow[] { return this.conversations }
   hasLoadedConversations(): boolean { return this.conversationsLoaded }
+  getRoomMessages(): ChatroomMessageRow[] { return this.roomMessages }
 
   getConvState(id: string): ConversationState {
     if (!this.convStates.has(id)) {
@@ -67,6 +72,17 @@ class AngelClient {
   onDocAdded(fn: DocListener): () => void {
     this.docListeners.add(fn)
     return () => this.docListeners.delete(fn)
+  }
+
+  onRoomUpdate(fn: RoomListener): () => void {
+    this.roomListeners.add(fn)
+    return () => this.roomListeners.delete(fn)
+  }
+
+  private notifyRoom() {
+    for (const fn of this.roomListeners) {
+      try { fn() } catch {}
+    }
   }
 
   private notify() {
@@ -352,6 +368,16 @@ class AngelClient {
         break
       }
 
+      case 'room:messages':
+        this.roomMessages = msg.messages
+        this.notifyRoom()
+        break
+
+      case 'room:new':
+        this.roomMessages = [...this.roomMessages, msg.message]
+        this.notifyRoom()
+        break
+
       case 'doc:added': {
         for (const fn of this.docListeners) {
           try { fn(msg) } catch {}
@@ -453,6 +479,14 @@ class AngelClient {
 
   stopStream(conversationId: string) {
     this.send({ type: 'stop', conversationId })
+  }
+
+  loadRoom(since?: string) {
+    this.send({ type: 'room:load', since })
+  }
+
+  postToRoom(content: string) {
+    this.send({ type: 'room:post', content })
   }
 
   private send(msg: ClientMsg) {
