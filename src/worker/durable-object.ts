@@ -4,6 +4,7 @@ import type {
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
 import { nameConversation } from './title'
+import { storeDocument } from './documents'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
 
@@ -141,6 +142,10 @@ export class AngelDO implements DurableObject {
 
       case 'chat':
         await this.handleChat(msg.conversationId, msg.clientMsgId, msg.content)
+        break
+
+      case 'doc:add':
+        await this.handleDocAdd(msg.conversationId, msg.clientDocId, msg.title, msg.content)
         break
 
       case 'stop':
@@ -363,6 +368,17 @@ export class AngelDO implements DurableObject {
   private handleStop(conversationId: string) {
     const stream = this.activeStreams.get(conversationId)
     if (stream) stream.aborted = true
+  }
+
+  // Store a document out of context. Angel learns it exists via the context note
+  // (see formatDocsNote) and reads it with the read_document tool.
+  private async handleDocAdd(conversationId: string, clientDocId: string, title: string, content: string) {
+    try {
+      const meta = await storeDocument(this.env, conversationId, title || 'Untitled document', content)
+      this.broadcast({ type: 'doc:added', conversationId, clientDocId, id: meta.id, title: meta.title, lineCount: meta.line_count })
+    } catch (e) {
+      console.error('[handleDocAdd]', e instanceof Error ? e.message : e)
+    }
   }
 
   private async postStreamWork(conversationId: string, userMessage: string, assistantText: string) {

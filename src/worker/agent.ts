@@ -8,6 +8,8 @@ import { renderStreamContext, type Pair } from './stream-pyramid'
 
 const MAX_TOOL_ROUNDS = 12
 
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+
 interface AgentContext {
   env: Env
   conversationId: string
@@ -89,8 +91,11 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     const announced = new Set<string>() // tool ids already shown to the client
 
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
-    // telling the client to discard the truncated partial first.
-    const STREAM_ATTEMPTS = 3
+    // telling the client to discard the truncated partial first. The provider's
+    // bad moments last seconds, so back off between tries (and give it more tries)
+    // rather than burning them all back-to-back into the same rough window. The
+    // reset the client receives on each retry is its cue that Angel is still going.
+    const STREAM_ATTEMPTS = 6
     for (let attempt = 0; attempt < STREAM_ATTEMPTS; attempt++) {
       if (attempt > 0) {
         yield { type: 'reset' }
@@ -98,6 +103,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         toolCalls = []
         toolCallArgs = new Map<number, string>()
         announced.clear()
+        await sleep(Math.min(600 * 2 ** (attempt - 1), 5000)) // 0.6s, 1.2s, 2.4s, 4.8s, 5s
       }
       try {
         for await (const chunk of chatCompletionStream(env, messages, { tools })) {

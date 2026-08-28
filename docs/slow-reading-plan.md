@@ -71,6 +71,8 @@ Not "zero infrastructure" - the minimum viable test needs exactly two things, an
 
 I'd build the tool. On first contact he gets the doc's shape - total lines, and the header outline if it's markdown - so he navigates structure, not blind numbers. Then the loop is his: recall, read a bounded chunk, reflect against what he knows, record, continue.
 
+**How he learns a doc exists (refined in build).** The first cut listed every stored doc in his standing context - "# Documents you can read" injected each turn. That's the wrong default: it clutters his context with things he isn't reading, the same mistake as force-feeding memory instead of leaving it behind `recall`. So the catalog moved behind a tool, `list_documents`, which he pulls when he wants to know what's around. What *does* belong in context is the pointer to a doc *the moment it's handed to him*: attaching a long file folds a compact `<document id title lines/>` tag (a handle, not the text) into that message, so he sees it arrive and can start reading right away. Standing context stays minimal; the handle rides in on the message that occasions it. The client shows the same handle as a chip, not the dumped text.
+
 **Background doesn't matter for the test; sequentiality does.** So Stage 0 runs in a normal visible thread on the hot path. It's capped by the tool-round budget, which is fine for a probe. This tells us, soon, whether reading with the rest out of view produces richer, more connected memory than a single pass. If it doesn't, we've saved ourselves the rest. If it does, we know exactly what to harden.
 
 ### Stage 1 - the real feature: a background reading job
@@ -80,6 +82,11 @@ If stage 0 earns it: take the same out-of-context, tool-driven loop and move it 
 Observations flow into the normal pipeline and get pyramided in the background as usual, so what he reads becomes part of his memory and folds into every future thread.
 
 The nice property you noticed: because every conversation already folds into the one stream, the read doesn't strictly need to *be* a conversation - it can just record. But giving it a visible thread lets you watch him think, and lets you talk to him from *another* thread while he reads, with his reading folding into that context live. That's the version I'd build.
+
+**Two things Stage 0 surfaced that Stage 1 has to answer:**
+
+- *Talking to him mid-read.* A long read is one long tool loop. You'll want to inject a message into that same loop while it runs - "skip ahead to the needling chapter", "you're overthinking this one" - not just start a fresh thread beside it. So the loop needs a way to check for and fold in a pending message between chunks. This is the harder half of the feature and it's where the background job and the message queue meet.
+- *How much of his ruminations you actually see.* Reading forty chunks means forty reflections. You almost certainly don't want all of them in the thread - maybe a spare progress line ("read chapters 3-4, nothing new on moxibustion depth") and the observations landing silently in memory, with the full reflection available only if you go looking. The default should be quiet; the reading shows up as *what he now knows*, not as a transcript of him thinking. Settle the reporting grain before building the visible thread.
 
 ### Stage 2 - only if warranted
 

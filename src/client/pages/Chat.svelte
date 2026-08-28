@@ -13,10 +13,12 @@
   let convState: ConversationState;
   let userHasScrolledUp = false;
 
-  // Text attachments: read client-side, inlined into the message, bytes discarded.
-  // No upload, no storage - the file's text becomes part of what Angel reads. A
-  // big file still dumps into context; that's the current behavior we're keeping.
-  const MAX_ATTACH_BYTES = 100 * 1024; // 100 KB per file
+  // Small text attachments: read client-side, inlined into the message, bytes
+  // discarded. No upload, no storage - the file's text becomes part of what Angel
+  // reads. Anything at or past DOC_THRESHOLD_CHARS is too big to dump into context,
+  // so it's stored as an out-of-context document Angel reads in passes instead.
+  const DOC_THRESHOLD_CHARS = 6000; // above this, store as a document, not inline
+  const DOC_MAX_BYTES = 1024 * 1024; // 1 MB ceiling over the WebSocket (PDF/large uploads come later)
   // Paste over either threshold becomes an attachment instead of flooding the box.
   const PASTE_ATTACH_CHARS = 600;
   const PASTE_ATTACH_LINES = 8;
@@ -33,6 +35,11 @@
   let fileInputEl: HTMLInputElement;
   let attachError = '';
 
+  // Long input stored as an out-of-context document. It's uploaded on attach; the
+  // real id arrives via onDocAdded. On send its pointer is folded into the message.
+  interface PendingDoc { clientDocId: string; title: string; lines: number; status: 'uploading' | 'ready'; id?: string }
+  let pendingDocs: PendingDoc[] = [];
+
   function isTextFile(name: string, type: string): boolean {
     const dot = name.lastIndexOf('.');
     const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
@@ -48,14 +55,18 @@
         attachError = `${file.name}: text files only for now (images and PDFs come later)`;
         continue;
       }
-      if (file.size > MAX_ATTACH_BYTES) {
-        attachError = `${file.name} is too big - ${Math.round(file.size / 1024)} KB, max ${Math.round(MAX_ATTACH_BYTES / 1024)} KB`;
+      if (file.size > DOC_MAX_BYTES) {
+        attachError = `${file.name} is too big - ${Math.round(file.size / 1024)} KB, max ${Math.round(DOC_MAX_BYTES / 1024)} KB for now (large/PDF uploads come later)`;
         continue;
       }
       let text: string;
       try { text = await file.text(); } catch { attachError = `Couldn't read ${file.name}`; continue; }
       if (text.includes('\u0000')) { attachError = `${file.name} looks binary, skipping`; continue; }
-      attachments = [...attachments, { name: file.name.replace(/"/g, ''), size: file.size, text }];
+      if (text.length >= DOC_THRESHOLD_CHARS) {
+        storeDoc(file.name.replace(/"/g, ''), text);
+      } else {
+        attachments = [...attachments, { name: file.name.replace(/"/g, ''), size: file.size, text }];
+      }
     }
   }
 
@@ -68,12 +79,30 @@
   function addPastedText(text: string) {
     attachError = '';
     const bytes = new Blob([text]).size;
-    if (bytes > MAX_ATTACH_BYTES) {
-      attachError = `That paste is large - ${Math.round(bytes / 1024)} KB, max ${Math.round(MAX_ATTACH_BYTES / 1024)} KB. Attach it as a file instead.`;
+    if (bytes > DOC_MAX_BYTES) {
+      attachError = `That paste is large - ${Math.round(bytes / 1024)} KB, max ${Math.round(DOC_MAX_BYTES / 1024)} KB for now.`;
+      return;
+    }
+    if (text.length >= DOC_THRESHOLD_CHARS) {
+      const d = pendingDocs.filter(p => p.title.startsWith('Pasted text')).length;
+      storeDoc(d === 0 ? 'Pasted text' : `Pasted text ${d + 1}`, text);
       return;
     }
     const n = attachments.filter(a => a.name.startsWith('Pasted text')).length;
     attachments = [...attachments, { name: n === 0 ? 'Pasted text' : `Pasted text ${n + 1}`, size: bytes, text }];
+  }
+
+  // Upload a long attachment/paste as an out-of-context document; hold a chip until
+  // its id comes back, then fold its pointer into the next message on send.
+  function storeDoc(title: string, text: string) {
+    const clientDocId = crypto.randomUUID();
+    const lines = text.split('\n').length;
+    pendingDocs = [...pendingDocs, { clientDocId, title, lines, status: 'uploading' }];
+    angel.addDocument(conversationId, clientDocId, title, text);
+  }
+
+  function removePendingDoc(clientDocId: string) {
+    pendingDocs = pendingDocs.filter(d => d.clientDocId !== clientDocId);
   }
 
   // Short pastes drop into the box as usual; long ones become an attachment.
@@ -103,18 +132,24 @@
 
   function buildContent(): string {
     const blocks = attachments.map(a => `<attached-file name="${a.name}">\n${a.text}\n</attached-file>`);
-    return [...blocks, messageText.trim()].filter(Boolean).join('\n\n');
+    // A document's pointer, not its text - Angel reads it out of context.
+    const docs = pendingDocs
+      .filter(d => d.status === 'ready' && d.id)
+      .map(d => `<document id="${d.id}" title="${d.title}" lines="${d.lines}"/>`);
+    return [...blocks, ...docs, messageText.trim()].filter(Boolean).join('\n\n');
   }
 
-  // Pull attached-file blocks back out for display so the transcript shows a chip,
-  // not the whole dumped file.
-  function parseUserContent(content: string): { files: string[]; text: string } {
+  // Pull attached-file blocks and document pointers back out for display so the
+  // transcript shows a chip, not the whole dumped file or a raw tag.
+  function parseUserContent(content: string): { files: string[]; docs: { title: string; lines: number }[]; text: string } {
     const files: string[] = [];
+    const docs: { title: string; lines: number }[] = [];
     const text = content
       .replace(/<attached-file name="([^"]*)">\n?[\s\S]*?\n?<\/attached-file>/g, (_m, name) => { files.push(name); return ''; })
+      .replace(/<document id="[^"]*" title="([^"]*)" lines="(\d+)"\s*\/>/g, (_m, title, lines) => { docs.push({ title, lines: +lines }); return ''; })
       .replace(/^\n+/, '')
       .trim();
-    return { files, text };
+    return { files, docs, text };
   }
 
   const renderer = new marked.Renderer();
@@ -132,9 +167,30 @@
     return window.matchMedia('(max-width: 1024px)').matches || 'ontouchstart' in window;
   }
 
+  function formatElapsed(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+
   $: convState = angel.getConvState(conversationId);
   $: streaming = convState?.streamState === 'streaming';
   $: connState = angel.getConnState();
+
+  // "Waiting on the API" indicator (ported from Glopus). The socket can be open and
+  // the stream live while nothing comes back for seconds at a time - a provider
+  // stall, a backoff retry, the gap between rounds. We track when the stream last
+  // advanced (streamSeq changing) and, if it's been quiet past a threshold, say so.
+  // We also show total elapsed since the turn began, so a long silence has a number.
+  let lastActivity = Date.now();
+  let lastSeq = -1;
+  let now = Date.now();
+  $: if (convState && convState.streamSeq !== lastSeq) { lastSeq = convState.streamSeq; lastActivity = Date.now(); }
+  $: elapsedSeconds = (streaming && convState?.streamStartTime) ? Math.floor((now - convState.streamStartTime) / 1000) : 0;
+  $: lastPart = convState?.streamParts?.[convState.streamParts.length - 1];
+  $: lastIsActiveTool = !!lastPart && lastPart.type === 'tool' && lastPart.result === undefined;
+  // A tool mid-execution already shows its own spinner - don't stack a second one.
+  $: waitingOnApi = streaming && (convState?.streamParts?.length ?? 0) > 0 && !lastIsActiveTool && (now - lastActivity) > 1500;
 
   // Draft persistence
   function saveDraft() {
@@ -154,10 +210,19 @@
   $: if (conversationId !== prevConvId) {
     if (prevConvId) saveDraft();
     prevConvId = conversationId;
+    // Attachments and stored-doc pointers belong to the conversation they were
+    // made in - a doc's id is bound to it - so don't carry them across a switch.
+    attachments = [];
+    pendingDocs = [];
+    attachError = '';
     loadDraft();
   }
 
+  let unsubDoc: (() => void) | null = null;
+  let thinkTimer: ReturnType<typeof setInterval> | null = null;
+
   onMount(() => {
+    thinkTimer = setInterval(() => { if (streaming) now = Date.now(); }, 500);
     unsub = angel.subscribe(() => {
       convState = angel.getConvState(conversationId);
       connState = angel.getConnState();
@@ -165,12 +230,21 @@
         tick().then(scrollToBottom);
       }
     });
+    unsubDoc = angel.onDocAdded((d) => {
+      pendingDocs = pendingDocs.map(p =>
+        p.clientDocId === d.clientDocId
+          ? { ...p, status: 'ready', id: d.id, title: d.title, lines: d.lineCount }
+          : p
+      );
+    });
     angel.loadConversation(conversationId);
     loadDraft();
   });
 
   onDestroy(() => {
     unsub?.();
+    unsubDoc?.();
+    if (thinkTimer) clearInterval(thinkTimer);
     saveDraft();
   });
 
@@ -205,10 +279,12 @@
 
   function sendMessage() {
     if (streaming) return;
-    if (!messageText.trim() && attachments.length === 0) return;
+    if (pendingDocs.some(d => d.status === 'uploading')) return; // wait for the doc id
+    if (!messageText.trim() && attachments.length === 0 && pendingDocs.length === 0) return;
     angel.sendChat(conversationId, buildContent());
     messageText = '';
     attachments = [];
+    pendingDocs = [];
     attachError = '';
     localStorage.removeItem(`angel-draft-${conversationId}`);
     userHasScrolledUp = false;
@@ -245,6 +321,8 @@
     list_add: ['Adding to list', 'Added to list'],
     list_supersede: ['Updating item', 'Updated item'],
     list_archive: ['Archiving item', 'Archived item'],
+    list_documents: ['Checking documents', 'Checked documents'],
+    read_document: ['Reading', 'Read a passage'],
   };
   function toolProgress(name: string): string {
     return TOOL_PHASES[name]?.[0] || 'Working';
@@ -297,12 +375,18 @@
         {#if msg.role === 'user'}
           {@const uc = parseUserContent(msg.content)}
           <div class="message user">
-            {#if uc.files.length}
+            {#if uc.files.length || uc.docs.length}
               <div class="attach-chips">
                 {#each uc.files as fname}
                   <span class="attach-chip">
                     <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M4 1.5A1.5 1.5 0 0 0 2.5 3v10A1.5 1.5 0 0 0 4 14.5h8a1.5 1.5 0 0 0 1.5-1.5V6L9 1.5H4z"/></svg>
                     {fname}
+                  </span>
+                {/each}
+                {#each uc.docs as d}
+                  <span class="attach-chip doc-chip">
+                    <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M3 2.5A1.5 1.5 0 0 1 4.5 1H12a1 1 0 0 1 1 1v11.5a.5.5 0 0 1-.5.5H4.5A1.5 1.5 0 0 1 3 12.5v-10zM4.5 12a.5.5 0 0 0 0 1H12v-1H4.5z"/></svg>
+                    {d.title} · {d.lines} lines
                   </span>
                 {/each}
               </div>
@@ -362,14 +446,23 @@
                 </div>
               {/if}
             {/each}
+            {#if waitingOnApi}
+              <div class="tool-row waiting">
+                <span class="tool-spinner"></span>
+                Waiting on the model ({formatElapsed(elapsedSeconds)})
+              </div>
+            {/if}
           </div>
         </div>
       {:else if streaming}
         <div class="message assistant streaming">
-          <div class="message-content">
+          <div class="message-content thinking-row">
             <span class="typing-indicator">
               <span></span><span></span><span></span>
             </span>
+            {#if elapsedSeconds > 2}
+              <span class="thinking-elapsed">Thinking ({formatElapsed(elapsedSeconds)})</span>
+            {/if}
           </div>
         </div>
       {/if}
@@ -390,6 +483,21 @@
             </div>
             <pre class="attach-card-preview">{attachPreview(a.text)}</pre>
           </div>
+        {/each}
+      </div>
+    {/if}
+    {#if pendingDocs.length}
+      <div class="doc-pending-row">
+        {#each pendingDocs as d}
+          <span class="attach-chip doc-chip" class:uploading={d.status === 'uploading'}>
+            {#if d.status === 'uploading'}
+              <span class="tool-spinner"></span>{d.title} · storing…
+            {:else}
+              <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M3 2.5A1.5 1.5 0 0 1 4.5 1H12a1 1 0 0 1 1 1v11.5a.5.5 0 0 1-.5.5H4.5A1.5 1.5 0 0 1 3 12.5v-10zM4.5 12a.5.5 0 0 0 0 1H12v-1H4.5z"/></svg>
+              {d.title} · {d.lines} lines to read
+            {/if}
+            <button class="chip-x" on:click={() => removePendingDoc(d.clientDocId)} title="Remove">×</button>
+          </span>
         {/each}
       </div>
     {/if}
@@ -417,7 +525,7 @@
           <button
             class="send-btn"
             on:click={sendMessage}
-            disabled={!messageText.trim() && attachments.length === 0}
+            disabled={(!messageText.trim() && attachments.length === 0 && pendingDocs.length === 0) || pendingDocs.some(d => d.status === 'uploading')}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
           </button>
@@ -583,6 +691,22 @@
   .tool-row.active {
     color: var(--accent);
   }
+  .tool-row.waiting {
+    color: var(--text-secondary);
+    font-style: italic;
+    opacity: 0.85;
+  }
+  .thinking-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .thinking-elapsed {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  }
 
   .tool-check {
     width: 12px;
@@ -714,6 +838,23 @@
     opacity: 0.6;
   }
   .chip-x:hover { opacity: 1; }
+
+  /* A stored document reads differently from an inlined file - tinted, and it
+     names how much there is to read rather than previewing it. */
+  .doc-chip {
+    background: var(--accent-soft, rgba(99, 102, 241, 0.12));
+    color: var(--accent, #4f46e5);
+    border-color: var(--accent, #4f46e5);
+  }
+  .doc-pending-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 4px 8px;
+  }
+  .doc-chip.uploading {
+    opacity: 0.7;
+  }
 
   .attach-error {
     margin: 0 0 8px;

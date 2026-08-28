@@ -166,6 +166,7 @@ export type ClientMsg =
   | { type: 'conv:rename'; conversationId: string; title: string }
   | { type: 'conv:load'; conversationId: string }
   | { type: 'chat'; conversationId: string; clientMsgId: string; content: string }
+  | { type: 'doc:add'; conversationId: string; clientDocId: string; title: string; content: string }
   | { type: 'stop'; conversationId: string }
 
 export type ServerMsg =
@@ -185,6 +186,7 @@ export type ServerMsg =
   | { type: 'done'; conversationId: string; seq: number; usage?: { input: number; output: number } }
   | { type: 'error'; conversationId: string; seq: number; message: string }
   | { type: 'stream:reset'; conversationId: string; seq: number; parts: StreamPart[] }
+  | { type: 'doc:added'; conversationId: string; clientDocId: string; id: string; title: string; lineCount: number }
 
 // Agent event types (internal, yielded by the agent loop)
 export type AgentEvent =

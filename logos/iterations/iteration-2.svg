@@ -1,0 +1,40 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="c2-tier-present" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="c2-tier-mid" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#4f7ff0"/>
+    </linearGradient>
+    <linearGradient id="c2-tier-past" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#5b6ee8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <radialGradient id="c2-glow" cx="0.5" cy="0.28" r="0.75">
+      <stop offset="0" stop-color="#1c2547"/>
+      <stop offset="1" stop-color="#0f1020"/>
+    </radialGradient>
+    <!-- Mask: the third tile minus a triangular counter, so the A's negative space shows the real background -->
+    <mask id="c2-a-counter">
+      <rect x="162" y="240" width="188" height="46" rx="12" fill="#fff"/>
+      <polygon points="256,243 297,283 215,283" fill="#000"/>
+    </mask>
+  </defs>
+
+  <g id="bg">
+    <rect x="0" y="0" width="512" height="512" rx="112" fill="#0f1020"/>
+    <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#c2-glow)"/>
+  </g>
+
+  <g id="pyramid">
+    <!-- Present (base, brightest, richest) up to deep past (apex, faded) -->
+    <rect x="98"  y="356" width="316" height="46" rx="12" fill="url(#c2-tier-present)"/>
+    <rect x="130" y="298" width="252" height="46" rx="12" fill="url(#c2-tier-mid)" opacity="0.92"/>
+    <!-- Third row from above: triangular gap forms the counter of an "A" -->
+    <rect x="162" y="240" width="188" height="46" rx="12" fill="url(#c2-tier-mid)" opacity="0.72" mask="url(#c2-a-counter)"/>
+    <rect x="194" y="182" width="124" height="46" rx="12" fill="url(#c2-tier-past)" opacity="0.52"/>
+    <rect x="226" y="130" width="60"  height="40" rx="11" fill="url(#c2-tier-past)" opacity="0.34"/>
+  </g>
+</svg>

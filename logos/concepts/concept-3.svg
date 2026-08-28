@@ -1,0 +1,27 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="c3-letter-grad" x1="256" y1="96" x2="256" y2="416" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="c3-halo-grad" x1="176" y1="252" x2="336" y2="292" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fbbf24"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+
+  <g id="bg">
+    <rect x="0" y="0" width="512" height="512" rx="112" fill="#16161f"/>
+  </g>
+
+  <g id="letter">
+    <path fill="url(#c3-letter-grad)" fill-rule="evenodd"
+          d="M232 96 h48 l108 320 h-72 l-19.5 -60 h-81 l-19.5 60 h-72 z
+             M256 176 l-25.5 78 h51 z"/>
+  </g>
+
+  <g id="halo">
+    <ellipse cx="256" cy="272" rx="80" ry="26"
+             fill="none" stroke="url(#c3-halo-grad)" stroke-width="17"/>
+  </g>
+</svg>

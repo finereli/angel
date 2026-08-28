@@ -15,10 +15,13 @@ export interface ConversationState {
   streamState: StreamState
   streamParts: StreamPart[]
   streamSeq: number
+  streamStartTime: number // ms epoch the current stream began; 0 when idle
   error: string | null
 }
 
 type Listener = () => void
+export interface DocAdded { conversationId: string; clientDocId: string; id: string; title: string; lineCount: number }
+type DocListener = (d: DocAdded) => void
 
 let nextMsgKey = -1
 
@@ -29,6 +32,7 @@ class AngelClient {
   private conversations: ConversationRow[] = []
   private convStates = new Map<string, ConversationState>()
   private listeners = new Set<Listener>()
+  private docListeners = new Set<DocListener>()
   private reconnectDelay = 1000
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingInterval: ReturnType<typeof setInterval> | null = null
@@ -47,6 +51,7 @@ class AngelClient {
         streamState: 'idle',
         streamParts: [],
         streamSeq: 0,
+        streamStartTime: 0,
         error: null,
       })
     }
@@ -56,6 +61,12 @@ class AngelClient {
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn)
     return () => this.listeners.delete(fn)
+  }
+
+  // A stored document resolved server-side (its real id is now known).
+  onDocAdded(fn: DocListener): () => void {
+    this.docListeners.add(fn)
+    return () => this.docListeners.delete(fn)
   }
 
   private notify() {
@@ -139,6 +150,7 @@ class AngelClient {
         for (const snapshot of msg.activeStreams) {
           const state = this.getConvState(snapshot.conversationId)
           state.streamState = 'streaming'
+          if (!state.streamStartTime) state.streamStartTime = Date.now()
           state.streamParts = rebuildPartsFromSnapshot(snapshot)
           state.streamSeq = snapshot.seq
         }
@@ -214,6 +226,7 @@ class AngelClient {
         state.messages = msg.messages
         if (msg.stream) {
           state.streamState = 'streaming'
+          if (!state.streamStartTime) state.streamStartTime = Date.now()
           state.streamParts = rebuildPartsFromSnapshot(msg.stream)
           state.streamSeq = msg.stream.seq
         }
@@ -262,6 +275,7 @@ class AngelClient {
         state.streamParts = msg.parts as StreamPart[]
         state.streamSeq = msg.seq
         state.streamState = 'streaming'
+        if (!state.streamStartTime) state.streamStartTime = Date.now()
         this.notify()
         break
       }
@@ -270,6 +284,7 @@ class AngelClient {
         const state = this.getConvState(msg.conversationId)
         if (msg.seq > state.streamSeq) {
           state.streamState = 'streaming'
+          if (!state.streamStartTime) state.streamStartTime = Date.now()
           const parts = state.streamParts
           const last = parts[parts.length - 1]
           if (last && last.type === 'text') {
@@ -288,6 +303,7 @@ class AngelClient {
         const state = this.getConvState(msg.conversationId)
         if (msg.seq > state.streamSeq) {
           state.streamState = 'streaming'
+          if (!state.streamStartTime) state.streamStartTime = Date.now()
           state.streamParts = [...state.streamParts, {
             type: 'tool', id: msg.id, name: msg.name, label: msg.label,
           }]
@@ -331,7 +347,15 @@ class AngelClient {
         state.streamState = 'idle'
         state.streamParts = []
         state.streamSeq = 0
+        state.streamStartTime = 0
         this.notify()
+        break
+      }
+
+      case 'doc:added': {
+        for (const fn of this.docListeners) {
+          try { fn(msg) } catch {}
+        }
         break
       }
 
@@ -357,6 +381,7 @@ class AngelClient {
         state.streamState = 'idle'
         state.streamParts = []
         state.streamSeq = 0
+        state.streamStartTime = 0
         state.error = msg.message
         setTimeout(() => {
           if (state.error === msg.message) {
@@ -389,6 +414,7 @@ class AngelClient {
     state.streamState = 'streaming'
     state.streamParts = []
     state.streamSeq = 0
+    state.streamStartTime = Date.now()
     state.error = null
 
     this.pendingSend = { conversationId, content, clientMsgId }
@@ -397,6 +423,12 @@ class AngelClient {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.send({ type: 'chat', conversationId, clientMsgId, content })
     }
+  }
+
+  // Store a long attachment as an out-of-context document. The real id comes back
+  // via onDocAdded, keyed by clientDocId.
+  addDocument(conversationId: string, clientDocId: string, title: string, content: string) {
+    this.send({ type: 'doc:add', conversationId, clientDocId, title, content })
   }
 
   createConversation() {
