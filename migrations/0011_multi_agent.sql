@@ -1,6 +1,8 @@
 -- Transform the system from single-agent to multi-agent with DM conversations.
 -- Each agent gets exactly one conversation (a DM), separate memory, shared chatroom.
 
+PRAGMA foreign_keys = OFF;
+
 -- 1. Agents table
 CREATE TABLE agents (
   id TEXT PRIMARY KEY,
@@ -93,3 +95,5 @@ CREATE UNIQUE INDEX idx_system_doc_agent ON system_doc(agent_id);
 CREATE INDEX idx_conversations_agent ON conversations(agent_id);
 CREATE INDEX idx_observations_agent ON observations(agent_id);
 CREATE INDEX idx_embeddings_agent ON embeddings(agent_id);
+
+PRAGMA foreign_keys = ON;
