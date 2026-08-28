@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { marked } from 'marked';
   import { angel } from '../streamManager';
   import type { ConversationState } from '../streamManager';
   import { TOOL_LABELS } from '../../worker/tools/registry';
+  import { renderMarkdown, dayKey, dateLabel } from '../util';
 
   export let conversationId: string;
 
@@ -151,17 +151,6 @@
       .replace(/^\n+/, '')
       .trim();
     return { files, docs, text };
-  }
-
-  const renderer = new marked.Renderer();
-  renderer.link = ({ href, title, text }) => {
-    const titleAttr = title ? ` title="${title}"` : '';
-    return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
-  };
-  marked.setOptions({ breaks: true, gfm: true, renderer });
-
-  function renderMarkdown(content: string): string {
-    return marked.parse(content) as string;
   }
 
   function isMobile(): boolean {
@@ -313,20 +302,6 @@
   }
   function toolDone(name: string, fallback?: string): string {
     return TOOL_LABELS[name]?.[1] || fallback || name;
-  }
-
-  function dayKey(ts: string): string {
-    return new Date(ts).toDateString();
-  }
-
-  function dateLabel(ts: string): string {
-    const d = new Date(ts);
-    const today = new Date();
-    const yest = new Date();
-    yest.setDate(today.getDate() - 1);
-    if (d.toDateString() === today.toDateString()) return 'Today';
-    if (d.toDateString() === yest.toDateString()) return 'Yesterday';
-    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
   function relativeTime(ts: string): string {
@@ -598,64 +573,6 @@
     background: var(--bg-message);
     color: var(--text-primary);
     border-bottom-left-radius: 2px;
-  }
-
-  /* Prose styles for markdown */
-  .prose :global(p) {
-    margin: 0.4em 0;
-  }
-  .prose :global(p:first-child) {
-    margin-top: 0;
-  }
-  .prose :global(p:last-child) {
-    margin-bottom: 0;
-  }
-  .prose :global(ul), .prose :global(ol) {
-    margin: 0.4em 0;
-    padding-left: 1.5em;
-  }
-  .prose :global(li) {
-    margin: 0.2em 0;
-  }
-  .prose :global(h1), .prose :global(h2), .prose :global(h3) {
-    margin: 0.6em 0 0.3em;
-    font-weight: 600;
-  }
-  .prose :global(h1) { font-size: 1.2em; }
-  .prose :global(h2) { font-size: 1.1em; }
-  .prose :global(h3) { font-size: 1.05em; }
-  .prose :global(blockquote) {
-    border-left: 3px solid var(--border);
-    padding-left: 12px;
-    margin: 0.4em 0;
-    color: var(--text-secondary);
-  }
-
-  .prose :global(pre) {
-    background: var(--bg-code);
-    padding: 12px 16px;
-    border-radius: 8px;
-    overflow-x: auto;
-    font-size: 0.85rem;
-    margin: 0.5em 0;
-    line-height: 1.5;
-  }
-
-  .prose :global(code) {
-    background: var(--bg-code);
-    padding: 1px 4px;
-    border-radius: 4px;
-    font-size: 0.88em;
-  }
-
-  .prose :global(pre code) {
-    background: none;
-    padding: 0;
-  }
-
-  .prose :global(a) {
-    color: var(--accent);
-    text-decoration: underline;
   }
 
   .tool-actions {

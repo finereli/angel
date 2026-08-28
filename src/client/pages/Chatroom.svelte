@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { marked } from 'marked';
   import { angel } from '../streamManager';
   import type { ChatroomMessageRow } from '../../worker/types';
+  import { renderMarkdown, dayKey, dateLabel, timeLabel } from '../util';
 
   let messages: ChatroomMessageRow[] = [];
   let messageText = '';
@@ -64,11 +64,6 @@
     textareaEl.style.height = Math.min(textareaEl.scrollHeight, 168) + 'px';
   }
 
-  function renderMarkdown(text: string): string {
-    try { return marked.parse(text, { async: false }) as string; }
-    catch { return text; }
-  }
-
   function authorColor(author: string): string {
     if (author === 'eli') return 'var(--accent)';
     // Distinct hues for different agents
@@ -82,27 +77,6 @@
     return author.charAt(0).toUpperCase() + author.slice(1);
   }
 
-  function timeLabel(ts: string): string {
-    try {
-      const d = new Date(ts + (ts.endsWith('Z') ? '' : 'Z'));
-      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    } catch { return ''; }
-  }
-
-  function dayKey(ts: string): string {
-    return (ts || '').slice(0, 10);
-  }
-
-  function dateLabel(ts: string): string {
-    try {
-      const d = new Date(ts + (ts.endsWith('Z') ? '' : 'Z'));
-      const now = new Date();
-      const diff = Math.floor((now.getTime() - d.getTime()) / 86400000);
-      if (diff === 0) return 'Today';
-      if (diff === 1) return 'Yesterday';
-      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    } catch { return ''; }
-  }
 </script>
 
 <div class="chatroom">
@@ -223,35 +197,6 @@
     white-space: pre-wrap;
     word-wrap: break-word;
   }
-
-  /* Prose (markdown) for agent messages */
-  .prose :global(p) { margin: 0.3em 0; }
-  .prose :global(p:first-child) { margin-top: 0; }
-  .prose :global(p:last-child) { margin-bottom: 0; }
-  .prose :global(ul), .prose :global(ol) { margin: 0.3em 0; padding-left: 1.5em; }
-  .prose :global(li) { margin: 0.15em 0; }
-  .prose :global(pre) {
-    background: var(--bg-code);
-    padding: 8px 12px;
-    border-radius: 6px;
-    overflow-x: auto;
-    font-size: 0.85rem;
-    margin: 0.4em 0;
-  }
-  .prose :global(code) {
-    background: var(--bg-code);
-    padding: 1px 4px;
-    border-radius: 4px;
-    font-size: 0.88em;
-  }
-  .prose :global(pre code) { background: none; padding: 0; }
-  .prose :global(blockquote) {
-    border-left: 3px solid var(--border);
-    padding-left: 12px;
-    margin: 0.3em 0;
-    color: var(--text-secondary);
-  }
-  .prose :global(a) { color: var(--accent); text-decoration: underline; }
 
   .empty-room {
     flex: 1;
