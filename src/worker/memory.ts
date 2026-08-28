@@ -127,7 +127,7 @@ async function createObsSummary(
   const res = await env.DB.prepare(
     `INSERT INTO observation_summaries (tag_id, tier, text, source_count, start_ts, end_ts)
      VALUES (?, ?, ?, ?, ?, ?)`
-  ).bind(tagId, tier, text, sourceCount, sources[0].ts, sources[sources.length - 1].ts).run()
+  ).bind(tagId, tier, text, sourceCount, sources[0]!.ts, sources[sources.length - 1]!.ts).run()
   const summaryId = res.meta.last_row_id as number
 
   for (const s of sources) {
@@ -169,7 +169,7 @@ export async function generateEmbedding(env: Env, text: string): Promise<number[
 
 function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0, na = 0, nb = 0
-  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i] }
+  for (let i = 0; i < a.length; i++) { dot += a[i]! * b[i]!; na += a[i]! * a[i]!; nb += b[i]! * b[i]! }
   return dot / (Math.sqrt(na) * Math.sqrt(nb))
 }
 
@@ -230,14 +230,14 @@ export async function recall(env: Env, query: string, limit = 8): Promise<Recall
 }
 
 export async function getMemoryStats(env: Env): Promise<{ tags: number; observations: number; summaries: number }> {
-  const [tags, obs, sums] = await env.DB.batch([
+  const results = await env.DB.batch([
     env.DB.prepare(`SELECT COUNT(*) as c FROM tags`),
     env.DB.prepare(`SELECT COUNT(*) as c FROM observations`),
     env.DB.prepare(`SELECT COUNT(*) as c FROM observation_summaries`),
   ])
   return {
-    tags: (tags.results[0] as { c: number }).c,
-    observations: (obs.results[0] as { c: number }).c,
-    summaries: (sums.results[0] as { c: number }).c,
+    tags: (results[0]!.results[0]! as { c: number }).c,
+    observations: (results[1]!.results[0]! as { c: number }).c,
+    summaries: (results[2]!.results[0]! as { c: number }).c,
   }
 }

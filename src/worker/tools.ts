@@ -6,8 +6,8 @@ import {
   getLists, getList, getListItems, addListItem,
   supersedeListItem, archiveListItem, createList,
 } from './lists'
+import { readDocument, formatDocsForTool, ingestContent } from './documents'
 import { fetchPage } from './web'
-import { readDocument, formatDocsForTool } from './documents'
 
 export function getToolDefinitions(): ToolDefinition[] {
   return [
@@ -238,7 +238,12 @@ export async function executeTool(
       return `Tags: ${s.tags}\nObservations: ${s.observations}\nSummaries: ${s.summaries}`
     }
     case 'web_fetch': {
-      return await fetchPage(args.url as string)
+      const md = await fetchPage(args.url as string)
+      if (md.startsWith('Failed to fetch:')) return md
+      const title = md.match(/^# (.+)/m)?.[1] || (args.url as string)
+      const result = await ingestContent(env, conversationId, title, md)
+      if (!result.stored) return result.text
+      return `Stored as a document for deep reading:\n"${result.meta.title}" - ${result.meta.line_count} lines (id: ${result.meta.id})\nUse read_document to read it in passes.`
     }
     case 'lists_catalog': {
       const lists = await getLists(env)

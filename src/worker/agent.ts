@@ -118,7 +118,8 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
               if (tc.id) {
                 toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
               }
-              if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
+              const existing = toolCalls[tc.index]
+              if (tc.function?.name && existing) existing.function.name = tc.function.name
               if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
               // Announce as soon as we know the tool's id + name, so the client can
               // show "Recording observation…" while the arguments are still generating.
@@ -217,7 +218,8 @@ export async function runMemoryPass(env: Env, conversationId: string): Promise<v
         if (choice.delta.tool_calls) {
           for (const tc of choice.delta.tool_calls) {
             if (tc.id) toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
-            if (tc.function?.name && toolCalls[tc.index]) toolCalls[tc.index].function.name = tc.function.name
+            const ex = toolCalls[tc.index]
+            if (tc.function?.name && ex) ex.function.name = tc.function.name
             if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
           }
         }

@@ -9,6 +9,20 @@ const nhm = new NodeHtmlMarkdown({
   useInlineLinks: true,
 })
 
+export function looksLikeHtml(text: string): boolean {
+  const head = text.slice(0, 500)
+  return /^\s*<!doctype\s+html/i.test(head) || /^\s*<html[\s>]/i.test(head) || /<head[\s>]/i.test(head)
+}
+
+export function htmlToMarkdown(html: string, fallbackTitle?: string): string {
+  const title = extractTitle(html) || fallbackTitle
+  const content = extractMainContent(html)
+  const clean = stripBlocks(content, STRIP_TAGS)
+  const md = nhm.translate(clean)
+  const result = title ? `# ${title}\n\n${md}` : md
+  return truncate(result)
+}
+
 export async function fetchPage(url: string): Promise<string> {
   const resp = await fetch(url, {
     headers: {
@@ -27,12 +41,7 @@ export async function fetchPage(url: string): Promise<string> {
     return truncate(body)
   }
 
-  const title = extractTitle(body)
-  const content = extractMainContent(body)
-  const clean = stripBlocks(content, STRIP_TAGS)
-  const md = nhm.translate(clean)
-  const result = title ? `# ${title}\n\n${md}` : md
-  return truncate(result)
+  return htmlToMarkdown(body)
 }
 
 function truncate(text: string): string {

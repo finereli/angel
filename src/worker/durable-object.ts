@@ -4,7 +4,7 @@ import type {
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
 import { nameConversation } from './title'
-import { storeDocument } from './documents'
+import { storeDocument, normalizeContent } from './documents'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
 
@@ -46,7 +46,7 @@ export class AngelDO implements DurableObject {
       }
 
       const pair = new WebSocketPair()
-      const [client, server] = Object.values(pair)
+      const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
 
       this.state.acceptWebSocket(server)
       server.serializeAttachment({ authed: false } satisfies WsAttachment)
@@ -374,7 +374,8 @@ export class AngelDO implements DurableObject {
   // (see formatDocsNote) and reads it with the read_document tool.
   private async handleDocAdd(conversationId: string, clientDocId: string, title: string, content: string) {
     try {
-      const meta = await storeDocument(this.env, conversationId, title || 'Untitled document', content)
+      const text = normalizeContent(content, title)
+      const meta = await storeDocument(this.env, conversationId, title || 'Untitled document', text)
       this.broadcast({ type: 'doc:added', conversationId, clientDocId, id: meta.id, title: meta.title, lineCount: meta.line_count })
     } catch (e) {
       console.error('[handleDocAdd]', e instanceof Error ? e.message : e)

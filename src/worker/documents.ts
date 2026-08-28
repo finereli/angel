@@ -1,8 +1,25 @@
 import type { Env } from './types'
+import { looksLikeHtml, htmlToMarkdown } from './web'
 
 export interface DocMeta { id: string; title: string; line_count: number }
+export type IngestResult = { stored: false; text: string } | { stored: true; meta: DocMeta }
+
+export const DOC_THRESHOLD_CHARS = 6000
 
 const MAX_READ_LINES = 200 // bound each bite so a read can't become a dump
+
+export function normalizeContent(text: string, fallbackTitle?: string): string {
+  return looksLikeHtml(text) ? htmlToMarkdown(text, fallbackTitle) : text
+}
+
+export async function ingestContent(
+  env: Env, conversationId: string, title: string, raw: string,
+): Promise<IngestResult> {
+  const text = normalizeContent(raw, title)
+  if (text.length < DOC_THRESHOLD_CHARS) return { stored: false, text }
+  const meta = await storeDocument(env, conversationId, title, text)
+  return { stored: true, meta }
+}
 
 export async function storeDocument(env: Env, conversationId: string, title: string, content: string): Promise<DocMeta> {
   const id = crypto.randomUUID()
@@ -26,8 +43,8 @@ function outlineOf(content: string): string {
   const lines = content.split('\n')
   const heads: string[] = []
   for (let i = 0; i < lines.length && heads.length < 50; i++) {
-    const m = lines[i].match(/^(#{1,6})\s+(.+)/)
-    if (m) heads.push(`${String(i + 1).padStart(6)}  ${'  '.repeat(m[1].length - 1)}${m[2].trim()}`)
+    const m = lines[i]!.match(/^(#{1,6})\s+(.+)/)
+    if (m) heads.push(`${String(i + 1).padStart(6)}  ${'  '.repeat(m[1]!.length - 1)}${m[2]!.trim()}`)
   }
   return heads.join('\n')
 }

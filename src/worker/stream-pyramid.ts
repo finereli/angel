@@ -59,7 +59,7 @@ export async function getPairsInRange(env: Env, startIdx: number, endIdx: number
       userContent: u.content,
       userTs: u.created_at,
       assistantContent: asst.results.map(a => a.content).join('\n\n'),
-      assistantTs: asst.results.length ? asst.results[asst.results.length - 1].created_at : null,
+      assistantTs: asst.results.length ? asst.results[asst.results.length - 1]!.created_at : null,
       conversationId: u.conversation_id,
       topic: u.topic,
       title: u.title,
@@ -119,7 +119,7 @@ async function buildTier1Tile(env: Env, start: number, end: number): Promise<voi
   ).join('\n\n')
   const text = await compressStream(env, body, 1)
   await insertTile(env, 1, start, end, text, pairs.length,
-    pairs[0].userTs, pairs[pairs.length - 1].assistantTs || pairs[pairs.length - 1].userTs)
+    pairs[0]!.userTs, pairs[pairs.length - 1]!.assistantTs || pairs[pairs.length - 1]!.userTs)
 }
 
 async function buildHigherTile(
@@ -129,7 +129,7 @@ async function buildHigherTile(
   const text = await compressStream(env, body, tier)
   const sourceCount = children.reduce((n, c) => n + c.source_count, 0)
   await insertTile(env, tier, start, end, text, sourceCount,
-    children[0].start_ts, children[children.length - 1].end_ts)
+    children[0]!.start_ts, children[children.length - 1]!.end_ts)
 }
 
 async function insertTile(
