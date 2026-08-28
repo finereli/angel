@@ -3,6 +3,7 @@
   import { marked } from 'marked';
   import { angel } from '../streamManager';
   import type { ConversationState } from '../streamManager';
+  import { TOOL_LABELS } from '../../worker/tools/registry';
 
   export let conversationId: string;
 
@@ -307,28 +308,11 @@
   }
 
   // [in-progress, done] label per tool - kind only, no description.
-  const TOOL_PHASES: Record<string, [string, string]> = {
-    web_fetch: ['Reading web page', 'Read web page'],
-    record_observation: ['Recording observation', 'Recorded observation'],
-    recall: ['Searching memory', 'Searched memory'],
-    create_tag: ['Creating tag', 'Created tag'],
-    update_tag_description: ['Updating tag', 'Updated tag'],
-    list_tags: ['Reviewing tags', 'Reviewed tags'],
-    memory_stats: ['Checking memory', 'Checked memory'],
-    lists_catalog: ['Checking lists', 'Checked lists'],
-    list_create: ['Creating list', 'Created list'],
-    list_read: ['Reading list', 'Read list'],
-    list_add: ['Adding to list', 'Added to list'],
-    list_supersede: ['Updating item', 'Updated item'],
-    list_archive: ['Archiving item', 'Archived item'],
-    list_documents: ['Checking documents', 'Checked documents'],
-    read_document: ['Reading', 'Read a passage'],
-  };
   function toolProgress(name: string): string {
-    return TOOL_PHASES[name]?.[0] || 'Working';
+    return TOOL_LABELS[name]?.[0] || 'Working';
   }
   function toolDone(name: string, fallback?: string): string {
-    return TOOL_PHASES[name]?.[1] || fallback || name;
+    return TOOL_LABELS[name]?.[1] || fallback || name;
   }
 
   function dayKey(ts: string): string {

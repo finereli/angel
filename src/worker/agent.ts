@@ -1,6 +1,6 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
 import { chatCompletionStream } from './llm'
-import { getToolDefinitions, executeTool } from './tools'
+import { getToolDefinitions, executeTool } from './tools/registry'
 import { OPERATING_NOTES } from './identity'
 import { buildListsPreamble } from './lists'
 import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
