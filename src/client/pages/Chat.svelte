@@ -467,7 +467,7 @@
         on:keydown={handleKeydown}
         on:paste={handlePaste}
         on:input={() => { autoResize(); saveDraft(); }}
-        placeholder="Message Angel..."
+        placeholder=""
         rows="1"
       ></textarea>
       <div class="composer-actions">
