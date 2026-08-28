@@ -2,16 +2,16 @@
 // and injected into his operating context. Not the code; the shape of the machine.
 import type { Env } from './types'
 
-export async function getSystemDoc(env: Env): Promise<string> {
-  const row = await env.DB.prepare(`SELECT content FROM system_doc WHERE id = 1`).first<{ content: string }>()
+export async function getSystemDoc(env: Env, agentId: string): Promise<string> {
+  const row = await env.DB.prepare(`SELECT content FROM system_doc WHERE agent_id = ?`).bind(agentId).first<{ content: string }>()
   return row?.content?.trim() || ''
 }
 
-export async function setSystemDoc(env: Env, content: string): Promise<void> {
+export async function setSystemDoc(env: Env, agentId: string, content: string): Promise<void> {
   await env.DB.prepare(
-    `INSERT INTO system_doc (id, content, updated_at) VALUES (1, ?, datetime('now'))
-     ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_at = datetime('now')`
-  ).bind(content).run()
+    `INSERT INTO system_doc (agent_id, content, updated_at) VALUES (?, ?, datetime('now'))
+     ON CONFLICT(agent_id) DO UPDATE SET content = excluded.content, updated_at = datetime('now')`
+  ).bind(agentId, content).run()
 }
 
 // A hand-authored default so Angel isn't blind on day one. Regenerate on deploy

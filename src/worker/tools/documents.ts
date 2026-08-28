@@ -12,8 +12,8 @@ export const documentTools: Tool[] = [
       },
     },
     label: ['Checking documents', 'Checked documents'],
-    run: async (env, conversationId) => {
-      return await formatDocsForTool(env, conversationId)
+    run: async (ctx) => {
+      return await formatDocsForTool(ctx.env, ctx.conversationId)
     },
   },
   {
@@ -34,8 +34,8 @@ export const documentTools: Tool[] = [
       },
     },
     label: ['Reading', 'Read a passage'],
-    run: async (env, _cid, args) => {
-      return await readDocument(env, args.document_id as string, args.start_line as number, args.end_line as number)
+    run: async (ctx, args) => {
+      return await readDocument(ctx.env, args.document_id as string, args.start_line as number, args.end_line as number)
     },
   },
 ]

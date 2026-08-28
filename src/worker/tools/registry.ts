@@ -6,10 +6,16 @@ import { webTools } from './web'
 import { utilTools } from './util'
 import { chatroomTools } from './chatroom'
 
+export interface ToolContext {
+  env: Env
+  conversationId: string
+  agentId: string
+}
+
 export interface Tool {
   def: ToolDefinition
   label: [string, string] // [in-progress, done]
-  run: (env: Env, conversationId: string, args: Record<string, unknown>) => Promise<string>
+  run: (ctx: ToolContext, args: Record<string, unknown>) => Promise<string>
 }
 
 const ALL_TOOLS: Tool[] = [
@@ -28,11 +34,11 @@ export function getToolDefinitions(): ToolDefinition[] {
 }
 
 export async function executeTool(
-  env: Env, conversationId: string, name: string, args: Record<string, unknown>,
+  ctx: ToolContext, name: string, args: Record<string, unknown>,
 ): Promise<string> {
   const tool = byName.get(name)
   if (!tool) return `Unknown tool: ${name}`
-  return tool.run(env, conversationId, args)
+  return tool.run(ctx, args)
 }
 
 export const TOOL_LABELS: Record<string, [string, string]> =

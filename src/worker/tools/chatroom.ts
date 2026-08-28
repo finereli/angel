@@ -17,12 +17,11 @@ export const chatroomTools: Tool[] = [
       },
     },
     label: ['Posting to chatroom', 'Posted to chatroom'],
-    run: async (env, _conversationId, args) => {
-      const author = 'angel' // will become dynamic with multi-tenant
+    run: async (ctx, args) => {
       const msg = args.message as string
-      await env.DB.prepare(
+      await ctx.env.DB.prepare(
         `INSERT INTO chatroom_messages (author, content) VALUES (?, ?)`
-      ).bind(author, msg).run()
+      ).bind(ctx.agentId, msg).run()
       return 'Posted.'
     },
   },
@@ -41,15 +40,15 @@ export const chatroomTools: Tool[] = [
       },
     },
     label: ['Reading chatroom', 'Read chatroom'],
-    run: async (env, _conversationId, args) => {
+    run: async (ctx, args) => {
       const since = args.since as string | undefined
       let rows
       if (since) {
-        rows = await env.DB.prepare(
+        rows = await ctx.env.DB.prepare(
           `SELECT id, author, content, created_at FROM chatroom_messages WHERE created_at > ? ORDER BY created_at ASC LIMIT 200`
         ).bind(since).all<{ id: number; author: string; content: string; created_at: string }>()
       } else {
-        rows = await env.DB.prepare(
+        rows = await ctx.env.DB.prepare(
           `SELECT id, author, content, created_at FROM chatroom_messages ORDER BY created_at DESC LIMIT 50`
         ).all<{ id: number; author: string; content: string; created_at: string }>()
         if (rows.results) rows.results.reverse()

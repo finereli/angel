@@ -1,7 +1,7 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
 import { chatCompletionStream } from './llm'
-import { getToolDefinitions, executeTool } from './tools/registry'
-import { OPERATING_NOTES } from './identity'
+import { getToolDefinitions, executeTool, type ToolContext } from './tools/registry'
+import { buildOperatingNotes } from './identity'
 import { buildListsPreamble } from './lists'
 import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
 import { renderStreamContext, type Pair } from './stream-pyramid'
@@ -13,14 +13,15 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 interface AgentContext {
   env: Env
   conversationId: string
+  agentId: string
+  agentName: string
 }
 
-// ---- Shared context assembly ----
-async function buildSystemPrompt(env: Env): Promise<string> {
-  const parts = [OPERATING_NOTES]
-  const doc = (await getSystemDoc(env)) || DEFAULT_SYSTEM_DOC
+async function buildSystemPrompt(env: Env, agentId: string, agentName: string): Promise<string> {
+  const parts = [buildOperatingNotes(agentName)]
+  const doc = (await getSystemDoc(env, agentId)) || DEFAULT_SYSTEM_DOC
   if (doc) parts.push(`# Your system\n${doc}`)
-  const lists = await buildListsPreamble(env) // instructions + memory-instructions (load_mode = always)
+  const lists = await buildListsPreamble(env, agentId)
   if (lists) parts.push(lists)
   return parts.join('\n\n')
 }
@@ -44,7 +45,7 @@ function verbatimTurns(pairs: Pair[]): ChatMessage[] {
   const msgs: ChatMessage[] = []
   for (const p of pairs) {
     if (!p.assistantContent) continue
-    const marker = `[${dateLine(p.userTs)}${p.topic ? ` · ${p.topic}` : ''}]`
+    const marker = `[${dateLine(p.userTs)}]`
     msgs.push({ role: 'user', content: `${marker} ${p.userContent}` })
     msgs.push({ role: 'assistant', content: p.assistantContent })
   }
@@ -53,29 +54,20 @@ function verbatimTurns(pairs: Pair[]): ChatMessage[] {
 
 // ---- Response pass (hot path, streaming) ----
 export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGenerator<AgentEvent> {
-  const { env, conversationId } = ctx
+  const { env, conversationId, agentId, agentName } = ctx
 
-  const system = await buildSystemPrompt(env)
-  const { tiles, verbatim, total } = await renderStreamContext(env)
+  const system = await buildSystemPrompt(env, agentId, agentName)
+  const { tiles, verbatim, total } = await renderStreamContext(env, agentId, conversationId)
   // The current message is already saved; drop it from the verbatim tail and append it live.
   const history = verbatim.filter(p => p.idx !== total - 1)
 
-  const conv = await env.DB.prepare(
-    `SELECT topic, (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) AS c
-     FROM conversations c WHERE id = ?`
-  ).bind(conversationId).first<{ topic: string | null; c: number }>()
-  const topic = conv?.topic || null
-  const isNewThread = (conv?.c ?? 0) <= 1
-  const marker = `[${dateLine(new Date().toISOString())}${topic ? ` · ${topic}` : ''}]`
-  const freshNote = isNewThread
-    ? " (Eli just opened a fresh thread - you have the whole history, but don't drag the last topic in unless it's relevant.)"
-    : ''
+  const marker = `[${dateLine(new Date().toISOString())}]`
 
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
     ...recapTurns(tiles),
     ...verbatimTurns(history),
-    { role: 'user', content: `${marker} ${userMessage}${freshNote}` },
+    { role: 'user', content: `${marker} ${userMessage}` },
   ]
 
   const tools = getToolDefinitions()
@@ -171,29 +163,28 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
       }
       let args: Record<string, unknown>
       try { args = JSON.parse(tc.function.arguments || '{}') } catch { args = {} }
+      const toolCtx: ToolContext = { env, conversationId, agentId }
       let result: string
-      try { result = await executeTool(env, conversationId, tc.function.name, args) }
+      try { result = await executeTool(toolCtx, tc.function.name, args) }
       catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       yield { type: 'tool_result', id: tc.id, result }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
   }
 
-  // Exhausted the tool-round budget: the DO persists the accumulated text on `done`.
   yield { type: 'error', message: 'Reached maximum tool call rounds' }
   yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
 }
 
 function isParseableArgs(s: string): boolean {
   const t = (s || '').trim()
-  if (t === '') return true // no-arg call
+  if (t === '') return true
   try { JSON.parse(t); return true } catch { return false }
 }
 
-// ---- Memory pass (off hot path): the same Angel, full context, deciding what to keep ----
-export async function runMemoryPass(env: Env, conversationId: string): Promise<void> {
-  const system = await buildSystemPrompt(env)
-  const { tiles, verbatim } = await renderStreamContext(env) // includes the just-finished exchange
+export async function runMemoryPass(env: Env, agentId: string, agentName: string, conversationId: string): Promise<void> {
+  const system = await buildSystemPrompt(env, agentId, agentName)
+  const { tiles, verbatim } = await renderStreamContext(env, agentId, conversationId)
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
     ...recapTurns(tiles),
@@ -237,8 +228,9 @@ export async function runMemoryPass(env: Env, conversationId: string): Promise<v
     for (const tc of valid) {
       let args: Record<string, unknown>
       try { args = JSON.parse(tc.function.arguments) } catch { args = {} }
+      const toolCtx: ToolContext = { env, conversationId, agentId }
       let result: string
-      try { result = await executeTool(env, conversationId, tc.function.name, args) }
+      try { result = await executeTool(toolCtx, tc.function.name, args) }
       catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }

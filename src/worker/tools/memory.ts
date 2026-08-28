@@ -21,8 +21,8 @@ export const memoryTools: Tool[] = [
       },
     },
     label: ['Recording observation', 'Recorded observation'],
-    run: async (env, conversationId, args) => {
-      const id = await addObservation(env, args.content as string, (args.tags as string[]) || [], 'agent', conversationId)
+    run: async (ctx, args) => {
+      const id = await addObservation(ctx.env, ctx.agentId, args.content as string, (args.tags as string[]) || [], 'agent', ctx.conversationId)
       return `Recorded (${id}).`
     },
   },
@@ -43,8 +43,8 @@ export const memoryTools: Tool[] = [
       },
     },
     label: ['Searching memory', 'Searched memory'],
-    run: async (env, _cid, args) => {
-      const hits = await recall(env, args.query as string, (args.limit as number) || 8)
+    run: async (ctx, args) => {
+      const hits = await recall(ctx.env, ctx.agentId, args.query as string, (args.limit as number) || 8)
       if (hits.length === 0) return 'Nothing found.'
       return hits.map(h => `[${h.label}] ${h.text}`).join('\n\n')
     },
@@ -66,8 +66,8 @@ export const memoryTools: Tool[] = [
       },
     },
     label: ['Creating tag', 'Created tag'],
-    run: async (env, _cid, args) => {
-      await createTag(env, args.name as string, args.description as string)
+    run: async (ctx, args) => {
+      await createTag(ctx.env, ctx.agentId, args.name as string, args.description as string)
       return `Tag "${args.name}" ready.`
     },
   },
@@ -85,8 +85,8 @@ export const memoryTools: Tool[] = [
       },
     },
     label: ['Updating tag', 'Updated tag'],
-    run: async (env, _cid, args) => {
-      await updateTagDescription(env, args.name as string, args.description as string)
+    run: async (ctx, args) => {
+      await updateTagDescription(ctx.env, ctx.agentId, args.name as string, args.description as string)
       return `Tag "${args.name}" updated.`
     },
   },
@@ -100,8 +100,8 @@ export const memoryTools: Tool[] = [
       },
     },
     label: ['Reviewing tags', 'Reviewed tags'],
-    run: async (env) => {
-      const tags = await getAllTags(env)
+    run: async (ctx) => {
+      const tags = await getAllTags(ctx.env, ctx.agentId)
       if (tags.length === 0) return 'No tags yet.'
       return tags.map(t => `- ${t.name} (${t.observation_count}): ${t.description || ''}`).join('\n')
     },
@@ -116,8 +116,8 @@ export const memoryTools: Tool[] = [
       },
     },
     label: ['Checking memory', 'Checked memory'],
-    run: async (env) => {
-      const s = await getMemoryStats(env)
+    run: async (ctx) => {
+      const s = await getMemoryStats(ctx.env, ctx.agentId)
       return `Tags: ${s.tags}\nObservations: ${s.observations}\nSummaries: ${s.summaries}`
     },
   },

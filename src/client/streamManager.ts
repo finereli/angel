@@ -1,6 +1,6 @@
 import type {
-  ClientMsg, ServerMsg, ConversationRow, MessageRow, StreamSnapshot,
-  ChatroomMessageRow,
+  ClientMsg, ServerMsg, MessageRow, StreamSnapshot,
+  ChatroomMessageRow, AgentInfo,
 } from '../worker/types'
 
 export type ConnState = 'disconnected' | 'connecting' | 'authenticating' | 'connected' | 'reconnecting'
@@ -31,7 +31,7 @@ class AngelClient {
   private ws: WebSocket | null = null
   private pin: string = ''
   private connState: ConnState = 'disconnected'
-  private conversations: ConversationRow[] = []
+  private agents: AgentInfo[] = []
   private convStates = new Map<string, ConversationState>()
   private listeners = new Set<Listener>()
   private docListeners = new Set<DocListener>()
@@ -42,11 +42,11 @@ class AngelClient {
   private pingInterval: ReturnType<typeof setInterval> | null = null
   private pongTimeout: ReturnType<typeof setTimeout> | null = null
   private pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
-  private conversationsLoaded = false
+  private agentsLoaded = false
 
   getConnState(): ConnState { return this.connState }
-  getConversations(): ConversationRow[] { return this.conversations }
-  hasLoadedConversations(): boolean { return this.conversationsLoaded }
+  getAgents(): AgentInfo[] { return this.agents }
+  hasLoadedAgents(): boolean { return this.agentsLoaded }
   getRoomMessages(): ChatroomMessageRow[] { return this.roomMessages }
 
   getConvState(id: string): ConversationState {
@@ -162,6 +162,8 @@ class AngelClient {
         this.connState = 'connected'
         this.reconnectDelay = 1000
         this.startPing()
+        this.agents = msg.agents
+        this.agentsLoaded = true
         const activeIds = new Set(msg.activeStreams.map(s => s.conversationId))
         for (const snapshot of msg.activeStreams) {
           const state = this.getConvState(snapshot.conversationId)
@@ -178,7 +180,6 @@ class AngelClient {
             this.send({ type: 'conv:load', conversationId: convId })
           }
         }
-        // Retry pending send
         if (this.pendingSend) {
           this.send({
             type: 'chat',
@@ -187,7 +188,6 @@ class AngelClient {
             content: this.pendingSend.content,
           })
         }
-        this.send({ type: 'conv:list' })
         this.notify()
         break
       }
@@ -204,39 +204,6 @@ class AngelClient {
         }
         break
 
-      case 'conv:list':
-        this.conversations = msg.conversations
-        this.conversationsLoaded = true
-        this.notify()
-        break
-
-      case 'conv:created':
-        this.conversations = [{
-          id: msg.conversationId,
-          title: null,
-          topic: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          archived: 0,
-          source: 'web',
-        }, ...this.conversations]
-        this.notify()
-        break
-
-      case 'conv:archived':
-        this.conversations = this.conversations.map(c =>
-          c.id === msg.conversationId ? { ...c, archived: 1 } : c
-        )
-        this.notify()
-        break
-
-      case 'conv:unarchived':
-        this.conversations = this.conversations.map(c =>
-          c.id === msg.conversationId ? { ...c, archived: 0 } : c
-        )
-        this.notify()
-        break
-
       case 'conv:messages': {
         const state = this.getConvState(msg.conversationId)
         state.messages = msg.messages
@@ -246,14 +213,6 @@ class AngelClient {
           state.streamParts = rebuildPartsFromSnapshot(msg.stream)
           state.streamSeq = msg.stream.seq
         }
-        this.notify()
-        break
-      }
-
-      case 'conv:title': {
-        this.conversations = this.conversations.map(c =>
-          c.id === msg.conversationId ? { ...c, title: msg.title } : c
-        )
         this.notify()
         break
       }
@@ -455,22 +414,6 @@ class AngelClient {
   // via onDocAdded, keyed by clientDocId.
   addDocument(conversationId: string, clientDocId: string, title: string, content: string) {
     this.send({ type: 'doc:add', conversationId, clientDocId, title, content })
-  }
-
-  createConversation() {
-    this.send({ type: 'conv:create' })
-  }
-
-  archiveConversation(id: string) {
-    this.send({ type: 'conv:archive', conversationId: id })
-  }
-
-  renameConversation(id: string, title: string) {
-    this.send({ type: 'conv:rename', conversationId: id, title })
-  }
-
-  unarchiveConversation(id: string) {
-    this.send({ type: 'conv:unarchive', conversationId: id })
   }
 
   loadConversation(id: string) {

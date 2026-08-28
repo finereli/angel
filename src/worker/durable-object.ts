@@ -1,10 +1,9 @@
 import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
-  ConversationRow, MessageRow, AgentEvent, StreamPart,
-  ChatroomMessageRow,
+  MessageRow, AgentEvent, StreamPart,
+  ChatroomMessageRow, AgentInfo,
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
-import { nameConversation } from './title'
 import { storeDocument, normalizeContent } from './documents'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
@@ -98,7 +97,8 @@ export class AngelDO implements DurableObject {
             parts: stream.parts,
           })
         }
-        this.send(ws, { type: 'auth:ok', activeStreams: snapshots })
+        const agents = await this.loadAgents()
+        this.send(ws, { type: 'auth:ok', activeStreams: snapshots, agents })
       } else {
         this.send(ws, { type: 'auth:fail' })
         ws.close(4001, 'Bad PIN')
@@ -115,26 +115,6 @@ export class AngelDO implements DurableObject {
     switch (msg.type) {
       case 'ping':
         this.send(ws, { type: 'pong', ts: msg.ts })
-        break
-
-      case 'conv:list':
-        await this.handleConvList(ws)
-        break
-
-      case 'conv:create':
-        await this.handleConvCreate(ws)
-        break
-
-      case 'conv:archive':
-        await this.handleConvArchive(ws, msg.conversationId)
-        break
-
-      case 'conv:unarchive':
-        await this.handleConvUnarchive(msg.conversationId)
-        break
-
-      case 'conv:rename':
-        await this.handleConvRename(msg.conversationId, msg.title)
         break
 
       case 'conv:load':
@@ -173,44 +153,20 @@ export class AngelDO implements DurableObject {
 
   // --- Handlers ---
 
-  private async handleConvList(ws: WebSocket) {
-    // Return archived too - the client shows them in a collapsible Archived section.
-    const result = await this.env.DB.prepare(
-      `SELECT * FROM conversations ORDER BY updated_at DESC LIMIT 100`
-    ).all<ConversationRow>()
-    this.send(ws, { type: 'conv:list', conversations: result.results })
+  private async loadAgents(): Promise<AgentInfo[]> {
+    const rows = await this.env.DB.prepare(
+      `SELECT a.id, a.name, c.id as conversation_id
+       FROM agents a JOIN conversations c ON c.agent_id = a.id
+       ORDER BY a.created_at`
+    ).all<{ id: string; name: string; conversation_id: string }>()
+    return rows.results.map(r => ({ id: r.id, name: r.name, conversationId: r.conversation_id }))
   }
 
-  private async handleConvCreate(ws: WebSocket) {
-    const id = crypto.randomUUID()
-    await this.env.DB.prepare(
-      `INSERT INTO conversations (id) VALUES (?)`
-    ).bind(id).run()
-    this.broadcast({ type: 'conv:created', conversationId: id })
-  }
-
-  private async handleConvArchive(ws: WebSocket, conversationId: string) {
-    await this.env.DB.prepare(
-      `UPDATE conversations SET archived = 1 WHERE id = ?`
-    ).bind(conversationId).run()
-    this.broadcast({ type: 'conv:archived', conversationId })
-  }
-
-  private async handleConvUnarchive(conversationId: string) {
-    await this.env.DB.prepare(
-      `UPDATE conversations SET archived = 0 WHERE id = ?`
-    ).bind(conversationId).run()
-    this.broadcast({ type: 'conv:unarchived', conversationId })
-  }
-
-  private async handleConvRename(conversationId: string, title: string) {
-    const clean = title.trim().slice(0, 100)
-    if (!clean) return
-    // Keep topic in sync with the human label - it's what Angel sees in context.
-    await this.env.DB.prepare(
-      `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
-    ).bind(clean, clean, conversationId).run()
-    this.broadcast({ type: 'conv:title', conversationId, title: clean, topic: clean })
+  private async resolveAgent(conversationId: string): Promise<{ agentId: string; agentName: string } | null> {
+    const row = await this.env.DB.prepare(
+      `SELECT a.id, a.name FROM conversations c JOIN agents a ON a.id = c.agent_id WHERE c.id = ?`
+    ).bind(conversationId).first<{ id: string; name: string }>()
+    return row ? { agentId: row.id, agentName: row.name } : null
   }
 
   private async handleConvLoad(ws: WebSocket, conversationId: string) {
@@ -232,8 +188,12 @@ export class AngelDO implements DurableObject {
   }
 
   private async handleChat(conversationId: string, clientMsgId: string, content: string) {
-    // Persist and echo the user message immediately so it is never lost, even if
-    // a turn ahead of it in the queue is still streaming.
+    const agent = await this.resolveAgent(conversationId)
+    if (!agent) {
+      console.error('[handleChat] no agent for conversation:', conversationId)
+      return
+    }
+
     try {
       const result = await this.env.DB.prepare(
         `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
@@ -250,24 +210,20 @@ export class AngelDO implements DurableObject {
       return
     }
 
-    // Responses are serialized across the whole DO: a second message queues
-    // behind the first rather than racing it or contaminating its context.
-    const respLink = this.responseChain.then(() => this.streamResponse(conversationId, content))
+    const { agentId, agentName } = agent
+    const respLink = this.responseChain.then(() => this.streamResponse(conversationId, agentId, agentName, content))
     this.responseChain = respLink.then(() => {}, () => {})
     let assistantText = ''
     try { assistantText = await respLink }
     catch (e) { console.error('[handleChat] response failed:', e instanceof Error ? e.message : e) }
 
-    // Memory work runs on its own chain so the next response never waits on it.
-    // We await it here (DO state.waitUntil is a no-op) so the handler keeps the
-    // DO alive until memory actually accretes.
-    const memLink = this.memoryChain.then(() => this.postStreamWork(conversationId, content, assistantText))
+    const memLink = this.memoryChain.then(() => this.postStreamWork(conversationId, agentId, agentName, content, assistantText))
     this.memoryChain = memLink.then(() => {}, () => {})
     try { await memLink }
     catch (e) { console.error('[handleChat] memory failed:', e instanceof Error ? e.message : e) }
   }
 
-  private async streamResponse(conversationId: string, content: string): Promise<string> {
+  private async streamResponse(conversationId: string, agentId: string, agentName: string, content: string): Promise<string> {
     const stream: ActiveStream = {
       conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, tools: [], parts: [], aborted: false,
     }
@@ -275,7 +231,7 @@ export class AngelDO implements DurableObject {
     let sawDone = false
 
     try {
-      for await (const event of runAgent({ env: this.env, conversationId }, content)) {
+      for await (const event of runAgent({ env: this.env, conversationId, agentId, agentName }, content)) {
         if (stream.aborted) break
         stream.seq++
         switch (event.type) {
@@ -391,52 +347,13 @@ export class AngelDO implements DurableObject {
     }
   }
 
-  private async postStreamWork(conversationId: string, userMessage: string, assistantText: string) {
-    // Naming and memory work run in parallel - naming never delays the pyramids,
-    // and neither is on the response hot path. Both are awaited (below) only so
-    // the DO stays alive until they finish.
-    const naming = this.nameIfNeeded(conversationId, userMessage, assistantText)
-      .catch(e => console.error('[postStreamWork:naming]', e instanceof Error ? e.message : e))
-
-    const memory = (async () => {
-      // The same Angel decides what to remember, then both pyramids roll up. Each
-      // step is isolated so one failure never blocks the others.
-      try { await runMemoryPass(this.env, conversationId) }
-      catch (e) { console.error('[postStreamWork:memory-pass]', e instanceof Error ? e.message : e) }
-      try { await buildObservationPyramid(this.env) }
-      catch (e) { console.error('[postStreamWork:obs-pyramid]', e instanceof Error ? e.message : e) }
-      try { await buildStreamPyramid(this.env) }
-      catch (e) { console.error('[postStreamWork:stream-pyramid]', e instanceof Error ? e.message : e) }
-    })()
-
-    await Promise.all([naming, memory])
-  }
-
-  // Name a conversation from its first exchange (title IS NULL, keyed so a fast
-  // follow-up can't skip it). The first conversation of the day whose opening is
-  // a plain greeting is labeled with the date instead.
-  private async nameIfNeeded(conversationId: string, userMessage: string, assistantText: string) {
-    if (!assistantText.trim()) return
-    const conv = await this.env.DB.prepare(
-      `SELECT title FROM conversations WHERE id = ?`
-    ).bind(conversationId).first<{ title: string | null }>()
-    if (!conv || conv.title) return
-
-    const others = await this.env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM conversations WHERE id != ? AND date(created_at) = date('now')`
-    ).bind(conversationId).first<{ n: number }>()
-    const firstOfDay = (others?.n ?? 0) === 0
-
-    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-    const now = new Date()
-    const dateLabel = `${MONTHS[now.getUTCMonth()]} ${now.getUTCDate()}`
-
-    const title = await nameConversation(this.env, userMessage, assistantText, { allowDate: firstOfDay, dateLabel })
-    if (!title) return // leave null so the next exchange retries
-    await this.env.DB.prepare(
-      `UPDATE conversations SET title = ?, topic = ? WHERE id = ?`
-    ).bind(title, title, conversationId).run()
-    this.broadcast({ type: 'conv:title', conversationId, title, topic: title })
+  private async postStreamWork(conversationId: string, agentId: string, agentName: string, _userMessage: string, _assistantText: string) {
+    try { await runMemoryPass(this.env, agentId, agentName, conversationId) }
+    catch (e) { console.error('[postStreamWork:memory-pass]', e instanceof Error ? e.message : e) }
+    try { await buildObservationPyramid(this.env, agentId) }
+    catch (e) { console.error('[postStreamWork:obs-pyramid]', e instanceof Error ? e.message : e) }
+    try { await buildStreamPyramid(this.env, agentId, conversationId) }
+    catch (e) { console.error('[postStreamWork:stream-pyramid]', e instanceof Error ? e.message : e) }
   }
 
   // --- Chatroom ---

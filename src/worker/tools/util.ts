@@ -14,7 +14,6 @@ export const utilTools: Tool[] = [
     run: async () => {
       const now = new Date()
       const utc = now.toISOString()
-      // Eli is in Israel (Asia/Jerusalem)
       const local = now.toLocaleString('en-US', {
         timeZone: 'Asia/Jerusalem',
         weekday: 'long',

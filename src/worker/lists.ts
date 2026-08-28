@@ -2,28 +2,29 @@ import type { Env, ListRow, ListItemRow } from './types'
 
 export async function createList(
   env: Env,
+  agentId: string,
   name: string,
   description: string,
   loadMode: string = 'on-demand'
 ): Promise<string> {
   const id = crypto.randomUUID()
   await env.DB.prepare(
-    `INSERT INTO lists (id, name, description, load_mode) VALUES (?, ?, ?, ?)`
-  ).bind(id, name, description, loadMode).run()
+    `INSERT INTO lists (id, agent_id, name, description, load_mode) VALUES (?, ?, ?, ?, ?)`
+  ).bind(id, agentId, name, description, loadMode).run()
   return id
 }
 
-export async function getLists(env: Env): Promise<ListRow[]> {
+export async function getLists(env: Env, agentId: string): Promise<ListRow[]> {
   const result = await env.DB.prepare(
-    `SELECT * FROM lists ORDER BY name`
-  ).all<ListRow>()
+    `SELECT * FROM lists WHERE agent_id = ? ORDER BY name`
+  ).bind(agentId).all<ListRow>()
   return result.results
 }
 
-export async function getList(env: Env, name: string): Promise<ListRow | null> {
+export async function getList(env: Env, agentId: string, name: string): Promise<ListRow | null> {
   return env.DB.prepare(
-    `SELECT * FROM lists WHERE name = ?`
-  ).bind(name).first<ListRow>()
+    `SELECT * FROM lists WHERE agent_id = ? AND name = ?`
+  ).bind(agentId, name).first<ListRow>()
 }
 
 export async function getListItems(
@@ -80,10 +81,10 @@ export async function archiveListItem(env: Env, itemId: number): Promise<void> {
   ).bind(itemId).run()
 }
 
-export async function buildListsPreamble(env: Env): Promise<string> {
+export async function buildListsPreamble(env: Env, agentId: string): Promise<string> {
   const lists = await env.DB.prepare(
-    `SELECT * FROM lists WHERE load_mode = 'always'`
-  ).all<ListRow>()
+    `SELECT * FROM lists WHERE agent_id = ? AND load_mode = 'always'`
+  ).bind(agentId).all<ListRow>()
 
   if (lists.results.length === 0) return ''
 
@@ -101,10 +102,10 @@ export async function buildListsPreamble(env: Env): Promise<string> {
   return parts.length > 1 ? parts.join('\n') : ''
 }
 
-export async function buildPerMessageReminder(env: Env): Promise<string> {
+export async function buildPerMessageReminder(env: Env, agentId: string): Promise<string> {
   const lists = await env.DB.prepare(
-    `SELECT * FROM lists WHERE load_mode = 'per-message'`
-  ).all<ListRow>()
+    `SELECT * FROM lists WHERE agent_id = ? AND load_mode = 'per-message'`
+  ).bind(agentId).all<ListRow>()
 
   if (lists.results.length === 0) return ''
 

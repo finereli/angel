@@ -5,42 +5,41 @@ import { OBS } from './config'
 import { chatCompletion } from './llm'
 
 // ---- Tags ----
-export async function createTag(env: Env, name: string, description: string): Promise<string> {
-  const existing = await getTag(env, name)
+export async function createTag(env: Env, agentId: string, name: string, description: string): Promise<string> {
+  const existing = await getTag(env, agentId, name)
   if (existing) return existing.id
   const id = crypto.randomUUID()
   await env.DB.prepare(
-    `INSERT INTO tags (id, name, description) VALUES (?, ?, ?)`
-  ).bind(id, name, description).run()
+    `INSERT INTO tags (id, agent_id, name, description) VALUES (?, ?, ?, ?)`
+  ).bind(id, agentId, name, description).run()
   return id
 }
 
-export async function getTag(env: Env, name: string): Promise<TagRow | null> {
-  return env.DB.prepare(`SELECT * FROM tags WHERE name = ?`).bind(name).first<TagRow>()
+export async function getTag(env: Env, agentId: string, name: string): Promise<TagRow | null> {
+  return env.DB.prepare(`SELECT * FROM tags WHERE agent_id = ? AND name = ?`).bind(agentId, name).first<TagRow>()
 }
 
-export async function getAllTags(env: Env): Promise<TagRow[]> {
-  return (await env.DB.prepare(`SELECT * FROM tags ORDER BY updated_at DESC`).all<TagRow>()).results
+export async function getAllTags(env: Env, agentId: string): Promise<TagRow[]> {
+  return (await env.DB.prepare(`SELECT * FROM tags WHERE agent_id = ? ORDER BY updated_at DESC`).bind(agentId).all<TagRow>()).results
 }
 
-export async function updateTagDescription(env: Env, name: string, description: string): Promise<void> {
+export async function updateTagDescription(env: Env, agentId: string, name: string, description: string): Promise<void> {
   await env.DB.prepare(
-    `UPDATE tags SET description = ?, updated_at = datetime('now') WHERE name = ?`
-  ).bind(description, name).run()
+    `UPDATE tags SET description = ?, updated_at = datetime('now') WHERE agent_id = ? AND name = ?`
+  ).bind(description, agentId, name).run()
 }
 
 // ---- Observations ----
 export async function addObservation(
-  env: Env, content: string, tagNames: string[], source: string, conversationId?: string
+  env: Env, agentId: string, content: string, tagNames: string[], source: string, conversationId?: string
 ): Promise<number> {
   const result = await env.DB.prepare(
-    `INSERT INTO observations (content, source, conversation_id) VALUES (?, ?, ?)`
-  ).bind(content, source, conversationId ?? null).run()
+    `INSERT INTO observations (agent_id, content, source, conversation_id) VALUES (?, ?, ?, ?)`
+  ).bind(agentId, content, source, conversationId ?? null).run()
   const obsId = result.meta.last_row_id as number
 
-  for (const name of Array.from(new Set(tagNames))) { // dedupe so counts don't drift
-    // Auto-create missing tags so an observation is never lost.
-    const tagId = await createTag(env, name, '')
+  for (const name of Array.from(new Set(tagNames))) {
+    const tagId = await createTag(env, agentId, name, '')
     await env.DB.prepare(
       `INSERT OR IGNORE INTO observation_tags (observation_id, tag_id) VALUES (?, ?)`
     ).bind(obsId, tagId).run()
@@ -49,7 +48,7 @@ export async function addObservation(
     ).bind(tagId).run()
   }
 
-  await embed(env, 'observation', obsId, content)
+  await embed(env, agentId, 'observation', obsId, content)
   return obsId
 }
 
@@ -58,21 +57,23 @@ export async function addObservation(
 // limit or run long; the rest rolls up on subsequent turns.
 const MAX_SUMMARIES_PER_BUILD = 6
 
-export async function buildObservationPyramid(env: Env): Promise<void> {
-  const tags = await getAllTags(env)
+export async function buildObservationPyramid(env: Env, agentId: string): Promise<void> {
+  const agent = await env.DB.prepare(`SELECT name FROM agents WHERE id = ?`).bind(agentId).first<{ name: string }>()
+  const agentName = agent?.name || agentId
+  const tags = await getAllTags(env, agentId)
   const budget = { left: MAX_SUMMARIES_PER_BUILD }
   for (const tag of tags) {
     if (budget.left <= 0) break
-    await rollupTag(env, tag.id, tag.name, budget)
+    await rollupTag(env, agentId, agentName, tag.id, tag.name, budget)
   }
 }
 
-async function rollupTag(env: Env, tagId: string, tagName: string, budget: { left: number }): Promise<void> {
+async function rollupTag(env: Env, agentId: string, agentName: string, tagId: string, tagName: string, budget: { left: number }): Promise<void> {
   // Tier 0: batch unsummarized observations
   let unsummarized = await getUnsummarizedObservations(env, tagId)
   while (unsummarized.length >= OBS.OBS_BATCH && budget.left > 0) {
     const batch = unsummarized.slice(0, OBS.OBS_BATCH)
-    await createObsSummary(env, tagId, 0, tagName,
+    await createObsSummary(env, agentId, agentName, tagId, 0, tagName,
       batch.map(o => ({ type: 'observation' as const, id: o.id, text: o.content, ts: o.created_at, count: 1 })))
     budget.left--
     unsummarized = unsummarized.slice(OBS.OBS_BATCH)
@@ -84,7 +85,7 @@ async function rollupTag(env: Env, tagId: string, tagName: string, budget: { lef
     if (pending.length < OBS.SUM_BATCH) break
     while (pending.length >= OBS.SUM_BATCH && budget.left > 0) {
       const batch = pending.slice(0, OBS.SUM_BATCH)
-      await createObsSummary(env, tagId, tier + 1, tagName,
+      await createObsSummary(env, agentId, agentName, tagId, tier + 1, tagName,
         batch.map(s => ({ type: 'summary' as const, id: s.id, text: s.text, ts: s.end_ts || s.created_at, count: s.source_count })))
       budget.left--
       pending = pending.slice(OBS.SUM_BATCH)
@@ -118,11 +119,11 @@ async function getUnsummarizedSummaries(env: Env, tagId: string, tier: number): 
 }
 
 async function createObsSummary(
-  env: Env, tagId: string, tier: number, tagName: string,
+  env: Env, agentId: string, agentName: string, tagId: string, tier: number, tagName: string,
   sources: Array<{ type: 'observation' | 'summary'; id: number; text: string; ts: string; count: number }>
 ): Promise<void> {
   const body = sources.map(s => s.text).join('\n\n')
-  const text = await compressObs(env, body, tier, tagName)
+  const text = await compressObs(env, agentName, body, tier, tagName)
   const sourceCount = sources.reduce((n, s) => n + s.count, 0)  // true observations beneath this tile
   const res = await env.DB.prepare(
     `INSERT INTO observation_summaries (tag_id, tier, text, source_count, start_ts, end_ts)
@@ -135,11 +136,11 @@ async function createObsSummary(
       `INSERT OR IGNORE INTO summary_sources (summary_id, source_type, source_id) VALUES (?, ?, ?)`
     ).bind(summaryId, s.type, s.id).run()
   }
-  await embed(env, 'obs_summary', summaryId, text)
+  await embed(env, agentId, 'obs_summary', summaryId, text)
 }
 
-async function compressObs(env: Env, body: string, tier: number, tagName: string): Promise<string> {
-  const system = `You are Angel, compressing your own memory about "${tagName}" into a tier-${tier} note.
+async function compressObs(env: Env, agentName: string, body: string, tier: number, tagName: string): Promise<string> {
+  const system = `You are ${agentName}, compressing your own memory about "${tagName}" into a tier-${tier} note.
 Keep specifics (names, dates, numbers), causal turns, and the texture that matters. Drop redundancy and generic filler.
 Write in your own voice - this is your memory, not a report. First person is fine.`
   const result = await chatCompletion(env, [
@@ -150,13 +151,13 @@ Write in your own voice - this is your memory, not a report. First person is fin
 }
 
 // ---- Embeddings + RAG ----
-export async function embed(env: Env, sourceType: string, sourceId: number, text: string): Promise<void> {
+export async function embed(env: Env, agentId: string, sourceType: string, sourceId: number, text: string): Promise<void> {
   try {
     const vec = await generateEmbedding(env, text)
-    if (vec.length === 0) return // don't store empty vectors (they poison cosine with NaN)
+    if (vec.length === 0) return
     await env.DB.prepare(
-      `INSERT OR REPLACE INTO embeddings (source_type, source_id, vector) VALUES (?, ?, ?)`
-    ).bind(sourceType, sourceId, JSON.stringify(vec)).run()
+      `INSERT OR REPLACE INTO embeddings (agent_id, source_type, source_id, vector) VALUES (?, ?, ?, ?)`
+    ).bind(agentId, sourceType, sourceId, JSON.stringify(vec)).run()
   } catch {
     // embedding failures are non-fatal
   }
@@ -181,19 +182,17 @@ export interface RecallHit {
 }
 
 // Search observations AND per-tag summaries; label each by level and backing count.
-export async function recall(env: Env, query: string, limit = 8): Promise<RecallHit[]> {
+export async function recall(env: Env, agentId: string, query: string, limit = 8): Promise<RecallHit[]> {
   const queryVec = await generateEmbedding(env, query)
   if (queryVec.length === 0) return []
 
-  // Page through embeddings by id so a large memory never returns one huge D1
-  // result (which would blow the result-size cap and break recall entirely).
   const PAGE = 500
   const top: Array<{ source_type: string; source_id: number; score: number }> = []
   let afterId = 0
   for (;;) {
     const page = (await env.DB.prepare(
-      `SELECT id, source_type, source_id, vector FROM embeddings WHERE id > ? ORDER BY id LIMIT ?`
-    ).bind(afterId, PAGE).all<{ id: number; source_type: string; source_id: number; vector: string }>()).results
+      `SELECT id, source_type, source_id, vector FROM embeddings WHERE agent_id = ? AND id > ? ORDER BY id LIMIT ?`
+    ).bind(agentId, afterId, PAGE).all<{ id: number; source_type: string; source_id: number; vector: string }>()).results
     if (page.length === 0) break
     for (const r of page) {
       afterId = r.id
@@ -229,11 +228,12 @@ export async function recall(env: Env, query: string, limit = 8): Promise<Recall
   return hits.sort((a, b) => b.score - a.score)
 }
 
-export async function getMemoryStats(env: Env): Promise<{ tags: number; observations: number; summaries: number }> {
+export async function getMemoryStats(env: Env, agentId: string): Promise<{ tags: number; observations: number; summaries: number }> {
   const results = await env.DB.batch([
-    env.DB.prepare(`SELECT COUNT(*) as c FROM tags`),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM observations`),
-    env.DB.prepare(`SELECT COUNT(*) as c FROM observation_summaries`),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM tags WHERE agent_id = ?`).bind(agentId),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM observations WHERE agent_id = ?`).bind(agentId),
+    env.DB.prepare(`SELECT COUNT(*) as c FROM observation_summaries os
+       WHERE EXISTS (SELECT 1 FROM tags t WHERE t.id = os.tag_id AND t.agent_id = ?)`).bind(agentId),
   ])
   return {
     tags: (results[0]!.results[0]! as { c: number }).c,

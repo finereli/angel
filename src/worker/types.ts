@@ -10,6 +10,12 @@ export interface Env {
 
 // DB row types
 
+export interface AgentRow {
+  id: string
+  name: string
+  created_at: string
+}
+
 export interface ConversationRow {
   id: string
   title: string | null
@@ -18,6 +24,7 @@ export interface ConversationRow {
   updated_at: string
   archived: number
   source: string
+  agent_id: string | null
 }
 
 export interface MessageRow {
@@ -163,14 +170,15 @@ export interface ChatroomMessageRow {
   created_at: string
 }
 
+export interface AgentInfo {
+  id: string
+  name: string
+  conversationId: string
+}
+
 export type ClientMsg =
   | { type: 'auth'; pin: string }
   | { type: 'ping'; ts: number }
-  | { type: 'conv:create' }
-  | { type: 'conv:list' }
-  | { type: 'conv:archive'; conversationId: string }
-  | { type: 'conv:unarchive'; conversationId: string }
-  | { type: 'conv:rename'; conversationId: string; title: string }
   | { type: 'conv:load'; conversationId: string }
   | { type: 'chat'; conversationId: string; clientMsgId: string; content: string }
   | { type: 'doc:add'; conversationId: string; clientDocId: string; title: string; content: string }
@@ -179,15 +187,10 @@ export type ClientMsg =
   | { type: 'room:post'; content: string }
 
 export type ServerMsg =
-  | { type: 'auth:ok'; activeStreams: StreamSnapshot[] }
+  | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agents: AgentInfo[] }
   | { type: 'auth:fail' }
   | { type: 'pong'; ts: number }
-  | { type: 'conv:list'; conversations: ConversationRow[] }
-  | { type: 'conv:created'; conversationId: string }
-  | { type: 'conv:archived'; conversationId: string }
-  | { type: 'conv:unarchived'; conversationId: string }
   | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot }
-  | { type: 'conv:title'; conversationId: string; title: string; topic: string | null }
   | { type: 'msg:user'; conversationId: string; clientMsgId: string; messageId: number; content: string }
   | { type: 'text'; conversationId: string; seq: number; content: string }
   | { type: 'tool_start'; conversationId: string; seq: number; id: string; name: string; label: string }
