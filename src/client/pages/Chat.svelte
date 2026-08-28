@@ -232,6 +232,7 @@
 
   // [in-progress, done] label per tool - kind only, no description.
   const TOOL_PHASES: Record<string, [string, string]> = {
+    web_fetch: ['Reading web page', 'Read web page'],
     record_observation: ['Recording observation', 'Recorded observation'],
     recall: ['Searching memory', 'Searched memory'],
     create_tag: ['Creating tag', 'Created tag'],

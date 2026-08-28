@@ -6,6 +6,7 @@ import {
   getLists, getList, getListItems, addListItem,
   supersedeListItem, archiveListItem, createList,
 } from './lists'
+import { fetchPage } from './web'
 
 export function getToolDefinitions(): ToolDefinition[] {
   return [
@@ -80,6 +81,21 @@ export function getToolDefinitions(): ToolDefinition[] {
         name: 'memory_stats',
         description: 'Counts: tags, observations, summaries.',
         parameters: { type: 'object', properties: {} },
+      },
+    },
+    // Web
+    {
+      type: 'function',
+      function: {
+        name: 'web_fetch',
+        description: 'Fetch a web page and return its content as Markdown. Use this when Eli shares a URL or when you need to read something from the web.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'The URL to fetch' },
+          },
+          required: ['url'],
+        },
       },
     },
     // Lists
@@ -195,6 +211,9 @@ export async function executeTool(
     case 'memory_stats': {
       const s = await getMemoryStats(env)
       return `Tags: ${s.tags}\nObservations: ${s.observations}\nSummaries: ${s.summaries}`
+    }
+    case 'web_fetch': {
+      return await fetchPage(args.url as string)
     }
     case 'lists_catalog': {
       const lists = await getLists(env)
