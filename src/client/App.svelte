@@ -13,7 +13,7 @@
   let appMenuOpen = false;
   let agentsLoaded = angel.hasLoadedAgents();
   type View = 'chat' | 'room';
-  let view: View = 'chat';
+  let view: View = (localStorage.getItem('lastView') as View) || 'chat';
   let showWall = false;
 
   let unsub: (() => void) | null = null;
@@ -21,6 +21,8 @@
   $: if (currentChatId) {
     localStorage.setItem('lastConversationId', currentChatId);
   }
+
+  $: localStorage.setItem('lastView', view);
 
   $: currentAgentName = agents.find(a => a.conversationId === currentChatId)?.name || '';
 
