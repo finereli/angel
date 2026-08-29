@@ -38,7 +38,7 @@ const MCP_TOOLS = [
       type: 'object',
       properties: {
         content: { type: 'string', description: 'Message text' },
-        author: { type: 'string', description: 'Author name (default: "claude")' },
+        author: { type: 'string', description: 'Author name (defaults to your token identity)' },
       },
       required: ['content'],
     },
@@ -94,7 +94,7 @@ function doStub(env: Env) {
   return env.ANGEL_DO.get(env.ANGEL_DO.idFromName('angel'))
 }
 
-async function callTool(env: Env, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }> {
+async function callTool(env: Env, name: string, args: Record<string, unknown>, callerId: string): Promise<{ text: string; isError?: boolean }> {
   switch (name) {
     case 'chatroom_read': {
       const since = args.since as string | undefined
@@ -119,7 +119,7 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
     case 'chatroom_post': {
       const content = (args.content as string || '').trim()
       if (!content) return { text: 'Empty message.', isError: true }
-      const author = (args.author as string || 'claude').trim()
+      const author = (args.author as string || callerId).trim()
       const stub = doStub(env)
       const res = await stub.fetch(new Request('http://do/api/room/post', {
         method: 'POST',
@@ -155,7 +155,7 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       const res = await stub.fetch(new Request('http://do/api/wall/pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messageId, pinnedBy: 'claude', reason }),
+        body: JSON.stringify({ messageId, pinnedBy: callerId, reason }),
       }))
       if (res.status === 409) return { text: `You already pinned message #${messageId}. Unpin first to change your reason.` }
       if (!res.ok) return { text: 'Failed to pin.', isError: true }
@@ -168,7 +168,7 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       const res = await stub.fetch(new Request('http://do/api/wall/unpin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messageId, pinnedBy: 'claude' }),
+        body: JSON.stringify({ messageId, pinnedBy: callerId }),
       }))
       const data = await res.json() as { removed: boolean }
       return { text: data.removed ? `Unpinned message #${messageId}.` : `You don't have a pin on message #${messageId}.` }
@@ -226,7 +226,7 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
   }
 }
 
-async function handleRpc(env: Env, req: JsonRpcRequest): Promise<object | null> {
+async function handleRpc(env: Env, req: JsonRpcRequest, callerId: string): Promise<object | null> {
   switch (req.method) {
     case 'initialize':
       return rpcOk(req.id, {
@@ -245,7 +245,7 @@ async function handleRpc(env: Env, req: JsonRpcRequest): Promise<object | null> 
     case 'tools/call': {
       const name = req.params?.name as string
       const args = (req.params?.arguments || {}) as Record<string, unknown>
-      const result = await callTool(env, name, args)
+      const result = await callTool(env, name, args, callerId)
       return rpcOk(req.id, {
         content: [{ type: 'text', text: result.text }],
         isError: result.isError || false,
@@ -280,12 +280,13 @@ export async function mcpHandler(c: C) {
     return c.json({ error: 'invalid_token' }, 401)
   }
 
+  const callerId = (payload.client_id as string || 'claude').replace(/-session$/, '')
   const body = await c.req.json() as JsonRpcRequest | JsonRpcRequest[]
   const requests = Array.isArray(body) ? body : [body]
   const responses: object[] = []
 
   for (const req of requests) {
-    const res = await handleRpc(c.env, req)
+    const res = await handleRpc(c.env, req, callerId)
     if (res !== null) responses.push(res)
   }
 
