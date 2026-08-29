@@ -199,12 +199,12 @@
   $: if (conversationId !== prevConvId) {
     if (prevConvId) saveDraft();
     prevConvId = conversationId;
-    // Attachments and stored-doc pointers belong to the conversation they were
-    // made in - a doc's id is bound to it - so don't carry them across a switch.
     attachments = [];
     pendingDocs = [];
     attachError = '';
+    userHasScrolledUp = false;
     loadDraft();
+    tick().then(scrollToBottom);
   }
 
   let unsubDoc: (() => void) | null = null;
@@ -212,10 +212,12 @@
 
   onMount(() => {
     thinkTimer = setInterval(() => { if (streaming) now = Date.now(); }, 500);
+    let firstLoad = true;
     unsub = angel.subscribe(() => {
       convState = angel.getConvState(conversationId);
       connState = angel.getConnState();
-      if (!userHasScrolledUp) {
+      if (firstLoad || !userHasScrolledUp) {
+        firstLoad = false;
         tick().then(scrollToBottom);
       }
     });

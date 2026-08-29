@@ -14,6 +14,7 @@
   let agentsLoaded = angel.hasLoadedAgents();
   type View = 'chat' | 'room';
   let view: View = 'chat';
+  let showWall = false;
 
   let unsub: (() => void) | null = null;
 
@@ -165,6 +166,11 @@
             Angel
           {/if}
         </span>
+        {#if view === 'room'}
+          <button class="icon-btn wall-btn" class:active={showWall} on:click={() => showWall = !showWall} title="Wall">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M12 2 L12 8 M12 8 L8 4 M12 8 L16 4 M12 8 L12 15 M4 15 L20 15 L20 22 L4 22 Z"/></svg>
+          </button>
+        {/if}
         <div class="app-menu">
           <button class="icon-btn kebab" on:click={() => appMenuOpen = !appMenuOpen} title="Menu">
             <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
@@ -181,7 +187,7 @@
       {/if}
 
       {#if view === 'room'}
-        <Chatroom />
+        <Chatroom bind:showWall />
       {:else if currentChatId}
         <Chat conversationId={currentChatId} />
       {:else if agentsLoaded && agents.length === 0}
@@ -333,6 +339,7 @@
     border-radius: 6px;
   }
   .icon-btn:hover { background: var(--bg-hover); }
+  .wall-btn.active { color: var(--accent); }
 
   .main {
     flex: 1;
