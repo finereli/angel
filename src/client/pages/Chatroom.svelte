@@ -404,14 +404,11 @@
     padding: 2px;
     border-radius: 4px;
     margin-left: auto;
-    opacity: 0;
+    opacity: 0.35;
     transition: opacity 0.15s;
   }
-  .wall-pin:hover .action-btn {
-    opacity: 0.4;
-  }
   .action-btn:hover {
-    opacity: 1 !important;
+    opacity: 1;
     background: var(--bg-active);
   }
 
