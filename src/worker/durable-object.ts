@@ -1,7 +1,7 @@
 import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
   MessageRow, AgentEvent, StreamPart,
-  ChatroomMessageRow, AgentInfo,
+  ChatroomMessageRow, WallPinRow, AgentInfo,
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
 import { storeDocument, normalizeContent } from './documents'
@@ -145,6 +145,18 @@ export class AngelDO implements DurableObject {
 
       case 'room:post':
         await this.handleRoomPost(msg.content)
+        break
+
+      case 'wall:load':
+        await this.handleWallLoad(ws)
+        break
+
+      case 'wall:pin':
+        await this.handleWallPin(ws, msg.messageId, msg.reason)
+        break
+
+      case 'wall:unpin':
+        await this.handleWallUnpin(msg.messageId)
         break
     }
   }
@@ -428,6 +440,46 @@ export class AngelDO implements DurableObject {
       created_at: new Date().toISOString(),
     }
     this.broadcast({ type: 'room:new', message: msg })
+  }
+
+  // --- Wall ---
+
+  private static readonly WALL_QUERY = `
+    SELECT w.id, w.message_id, w.pinned_by, w.reason, w.created_at,
+           m.author, m.content, m.created_at AS message_created_at
+    FROM wall_pins w
+    JOIN chatroom_messages m ON m.id = w.message_id
+    ORDER BY w.created_at ASC`
+
+  private async handleWallLoad(ws: WebSocket) {
+    const rows = await this.env.DB.prepare(AngelDO.WALL_QUERY)
+      .all<WallPinRow>()
+    this.send(ws, { type: 'wall:pins', pins: rows.results || [] })
+  }
+
+  private async handleWallPin(ws: WebSocket, messageId: number, reason?: string) {
+    try {
+      await this.env.DB.prepare(
+        `INSERT INTO wall_pins (message_id, pinned_by, reason) VALUES (?, ?, ?)`
+      ).bind(messageId, 'eli', reason || '').run()
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message.includes('UNIQUE')) return
+      throw e
+    }
+    const row = await this.env.DB.prepare(
+      `SELECT w.id, w.message_id, w.pinned_by, w.reason, w.created_at,
+              m.author, m.content, m.created_at AS message_created_at
+       FROM wall_pins w JOIN chatroom_messages m ON m.id = w.message_id
+       WHERE w.message_id = ?`
+    ).bind(messageId).first<WallPinRow>()
+    if (row) this.broadcast({ type: 'wall:pinned', pin: row })
+  }
+
+  private async handleWallUnpin(messageId: number) {
+    await this.env.DB.prepare(
+      `DELETE FROM wall_pins WHERE message_id = ?`
+    ).bind(messageId).run()
+    this.broadcast({ type: 'wall:unpinned', messageId })
   }
 
   // --- Restart recovery ---

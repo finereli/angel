@@ -7,6 +7,7 @@ import { utilTools } from './util'
 import { chatroomTools } from './chatroom'
 import { budgetTools } from './budget'
 import { wakeupTools } from './wakeup'
+import { wallTools } from './wall'
 
 export interface ToolContext {
   env: Env
@@ -29,6 +30,7 @@ const ALL_TOOLS: Tool[] = [
   ...chatroomTools,
   ...budgetTools,
   ...wakeupTools,
+  ...wallTools,
 ]
 
 const byName = new Map(ALL_TOOLS.map(t => [t.def.function.name, t]))

@@ -170,6 +170,18 @@ export interface ChatroomMessageRow {
   created_at: string
 }
 
+export interface WallPinRow {
+  id: number
+  message_id: number
+  pinned_by: string
+  reason: string
+  created_at: string
+  // joined from chatroom_messages
+  author: string
+  content: string
+  message_created_at: string
+}
+
 export interface AgentInfo {
   id: string
   name: string
@@ -185,6 +197,9 @@ export type ClientMsg =
   | { type: 'stop'; conversationId: string }
   | { type: 'room:load'; since?: string }
   | { type: 'room:post'; content: string }
+  | { type: 'wall:load' }
+  | { type: 'wall:pin'; messageId: number; reason?: string }
+  | { type: 'wall:unpin'; messageId: number }
 
 export type ServerMsg =
   | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agents: AgentInfo[] }
@@ -201,6 +216,9 @@ export type ServerMsg =
   | { type: 'doc:added'; conversationId: string; clientDocId: string; id: string; title: string; lineCount: number }
   | { type: 'room:messages'; messages: ChatroomMessageRow[] }
   | { type: 'room:new'; message: ChatroomMessageRow }
+  | { type: 'wall:pins'; pins: WallPinRow[] }
+  | { type: 'wall:pinned'; pin: WallPinRow }
+  | { type: 'wall:unpinned'; messageId: number }
 
 // Agent event types (internal, yielded by the agent loop)
 export type AgentEvent =

@@ -21,4 +21,7 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   schedule_wakeup: ['Scheduling wake-up', 'Scheduled wake-up'],
   check_wakeup: ['Checking wake-up', 'Checked wake-up'],
   cancel_wakeup: ['Cancelling wake-up', 'Cancelled wake-up'],
+  wall_pin: ['Pinning to wall', 'Pinned to wall'],
+  wall_unpin: ['Unpinning from wall', 'Unpinned from wall'],
+  wall_read: ['Reading wall', 'Read wall'],
 }

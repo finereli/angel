@@ -1,6 +1,6 @@
 import type {
   ClientMsg, ServerMsg, MessageRow, StreamSnapshot,
-  ChatroomMessageRow, AgentInfo,
+  ChatroomMessageRow, WallPinRow, AgentInfo,
 } from '../worker/types'
 
 export type ConnState = 'disconnected' | 'connecting' | 'authenticating' | 'connected' | 'reconnecting'
@@ -37,6 +37,8 @@ class AngelClient {
   private docListeners = new Set<DocListener>()
   private roomListeners = new Set<RoomListener>()
   private roomMessages: ChatroomMessageRow[] = []
+  private wallListeners = new Set<RoomListener>()
+  private wallPins: WallPinRow[] = []
   private reconnectDelay = 1000
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingInterval: ReturnType<typeof setInterval> | null = null
@@ -49,6 +51,7 @@ class AngelClient {
   getAgents(): AgentInfo[] { return this.agents }
   hasLoadedAgents(): boolean { return this.agentsLoaded }
   getRoomMessages(): ChatroomMessageRow[] { return this.roomMessages }
+  getWallPins(): WallPinRow[] { return this.wallPins }
 
   getConvState(id: string): ConversationState {
     if (!this.convStates.has(id)) {
@@ -80,8 +83,19 @@ class AngelClient {
     return () => this.roomListeners.delete(fn)
   }
 
+  onWallUpdate(fn: RoomListener): () => void {
+    this.wallListeners.add(fn)
+    return () => this.wallListeners.delete(fn)
+  }
+
   private notifyRoom() {
     for (const fn of this.roomListeners) {
+      try { fn() } catch {}
+    }
+  }
+
+  private notifyWall() {
+    for (const fn of this.wallListeners) {
       try { fn() } catch {}
     }
   }
@@ -347,6 +361,21 @@ class AngelClient {
         this.notifyRoom()
         break
 
+      case 'wall:pins':
+        this.wallPins = msg.pins
+        this.notifyWall()
+        break
+
+      case 'wall:pinned':
+        this.wallPins = [...this.wallPins, msg.pin]
+        this.notifyWall()
+        break
+
+      case 'wall:unpinned':
+        this.wallPins = this.wallPins.filter(p => p.message_id !== msg.messageId)
+        this.notifyWall()
+        break
+
       case 'doc:added': {
         for (const fn of this.docListeners) {
           try { fn(msg) } catch {}
@@ -445,6 +474,22 @@ class AngelClient {
 
   postToRoom(content: string) {
     this.send({ type: 'room:post', content })
+  }
+
+  loadWall() {
+    this.send({ type: 'wall:load' })
+  }
+
+  pinToWall(messageId: number, reason?: string) {
+    this.send({ type: 'wall:pin', messageId, reason })
+  }
+
+  unpinFromWall(messageId: number) {
+    this.send({ type: 'wall:unpin', messageId })
+  }
+
+  isOnWall(messageId: number): boolean {
+    return this.wallPins.some(p => p.message_id === messageId)
   }
 
   private send(msg: ClientMsg) {
