@@ -80,6 +80,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     let toolCalls: ToolCall[] = []
     let toolCallArgs = new Map<number, string>()
     let truncated = false
+    let finishReason: string | null = null
     const announced = new Set<string>() // tool ids already shown to the client
 
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
@@ -94,6 +95,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         assistantText = ''
         toolCalls = []
         toolCallArgs = new Map<number, string>()
+        finishReason = null
         announced.clear()
         await sleep(Math.min(600 * 2 ** (attempt - 1), 5000)) // 0.6s, 1.2s, 2.4s, 4.8s, 5s
       }
@@ -101,6 +103,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         for await (const chunk of chatCompletionStream(env, messages, { tools })) {
           const choice = chunk.choices[0]
           if (!choice) continue
+          if (choice.finish_reason) finishReason = choice.finish_reason
           if (choice.delta.content) {
             assistantText += choice.delta.content
             yield { type: 'text', content: choice.delta.content }
@@ -137,43 +140,53 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     }
 
     for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
-    // Only execute well-formed tool calls - a truncated stream can leave a
-    // half-serialized call with unparseable arguments or an empty name.
-    const valid = toolCalls.filter(tc => tc && tc.function.name && isParseableArgs(tc.function.arguments))
+    // Keep every named call, well-formed or not. A call whose arguments never
+    // finished streaming (most often finish_reason=length: the output-token cap
+    // hit mid-call) used to be dropped silently here, ending the turn with
+    // "let me do X:" and no X. Now it gets an error tool-result instead, so the
+    // model sees the failure and reissues the call in the next round.
+    const calls = toolCalls.filter(tc => tc && tc.function.name)
 
-    if (valid.length === 0) {
-      // No (usable) tool calls: this is the final reply for the turn. The DO has
+    if (calls.length === 0) {
+      // No tool calls: this is the final reply for the turn. The DO has
       // accumulated the streamed text; emit any trailing marker as text so it
       // lands in the saved reply too, then let the DO persist on `done`.
       if (truncated && (fullText + assistantText).trim()) yield { type: 'text', content: ' …[cut off]' }
       else if (!(fullText + assistantText).trim()) yield { type: 'text', content: '*(the response was cut off before anything came through)*' }
-      yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
+      yield { type: 'done', usage: { input: totalInput, output: totalOutput }, finishReason }
       return
     }
 
     // Commit this round's text before running tools; a later reset can't roll past it.
     fullText += assistantText
     yield { type: 'commit' }
-    messages.push({ role: 'assistant', content: assistantText || null, tool_calls: valid })
-    for (const tc of valid) {
+    messages.push({ role: 'assistant', content: assistantText || null, tool_calls: calls })
+    for (const tc of calls) {
       // Usually already announced mid-stream; announce here only if it wasn't.
       if (!announced.has(tc.id)) {
         announced.add(tc.id)
-        yield { type: 'tool_start', id: tc.id, name: tc.function.name, label: '' }
+        yield { type: 'tool_start', id: tc.id, name: tc.function.name, label: TOOL_LABELS[tc.function.name]?.[0] || tc.function.name }
       }
-      let args: Record<string, unknown>
-      try { args = JSON.parse(tc.function.arguments || '{}') } catch { args = {} }
-      const toolCtx: ToolContext = { env, conversationId, agentId }
       let result: string
-      try { result = await executeTool(toolCtx, tc.function.name, args) }
-      catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
+      if (!isParseableArgs(tc.function.arguments)) {
+        console.error(`[runAgent] truncated tool call ${tc.function.name} (finish_reason=${finishReason})`)
+        result = 'Error: this tool call was cut off before its arguments finished streaming'
+          + (finishReason === 'length' ? ' (output token limit reached)' : '')
+          + '. Make the call again.'
+      } else {
+        let args: Record<string, unknown>
+        try { args = JSON.parse(tc.function.arguments || '{}') } catch { args = {} }
+        const toolCtx: ToolContext = { env, conversationId, agentId }
+        try { result = await executeTool(toolCtx, tc.function.name, args) }
+        catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
+      }
       yield { type: 'tool_result', id: tc.id, result, label: TOOL_LABELS[tc.function.name]?.[1] || tc.function.name }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
   }
 
   yield { type: 'error', message: 'Reached maximum tool call rounds' }
-  yield { type: 'done', usage: { input: totalInput, output: totalOutput } }
+  yield { type: 'done', usage: { input: totalInput, output: totalOutput }, finishReason: 'max_rounds' }
 }
 
 function isParseableArgs(s: string): boolean {

@@ -57,7 +57,9 @@ export async function* chatCompletionStream(
     model: getModel(env),
     messages,
     temperature: opts.temperature ?? 0.7,
-    max_tokens: opts.max_tokens ?? 4096,
+    // Reasoning models spend thinking tokens against this cap; 4096 was getting
+    // exhausted mid-tool-call in context-heavy rounds (finish_reason: length).
+    max_tokens: opts.max_tokens ?? 8192,
     stream: true,
     stream_options: { include_usage: true },
   }

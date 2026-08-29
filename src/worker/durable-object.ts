@@ -14,6 +14,7 @@ interface ActiveStream {
   text: string
   commitLen: number // length of `text` committed by prior tool rounds (reset floor)
   commitPartLen: number // count of `parts` committed by prior rounds (reset floor)
+  savedLen: number // length of `text` last flushed to D1 (periodic-save watermark, NOT the reset floor)
   tools: Array<{ id: string; name: string; label: string; result?: string }>
   parts: StreamPart[] // ordered text/tool parts, as the reply is rendered
   aborted: boolean
@@ -232,7 +233,7 @@ export class AngelDO implements DurableObject {
 
   private async streamResponse(conversationId: string, agentId: string, agentName: string, content: string): Promise<string> {
     const stream: ActiveStream = {
-      conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, tools: [], parts: [], aborted: false, savedMsgId: null,
+      conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, savedLen: 0, tools: [], parts: [], aborted: false, savedMsgId: null,
     }
     this.activeStreams.set(conversationId, stream)
     await this.state.storage.put(`streaming:${conversationId}`, agentId)
@@ -251,10 +252,12 @@ export class AngelDO implements DurableObject {
             else stream.parts.push({ type: 'text', content: event.content })
             this.broadcast({ type: 'text', conversationId, seq: stream.seq, content: event.content })
             // Periodic save: flush to D1 every ~200 chars of unsaved text so a
-            // DO eviction doesn't lose the entire final round.
-            if (stream.text.length - stream.commitLen >= 200 && stream.text.trim()) {
-              stream.commitLen = stream.text.length
-              stream.commitPartLen = stream.parts.length
+            // DO eviction doesn't lose the entire final round. This must NOT
+            // touch commitLen/commitPartLen - those are the retry rollback
+            // floor, and moving them mid-round would make a reset keep partial
+            // text from the failed attempt.
+            if (stream.text.length - stream.savedLen >= 200 && stream.text.trim()) {
+              stream.savedLen = stream.text.length
               stream.savedMsgId = await this.saveAssistant(
                 conversationId, stream.text, stream.parts, undefined, stream.savedMsgId,
               )
@@ -265,6 +268,7 @@ export class AngelDO implements DurableObject {
             stream.commitLen = stream.text.length
             stream.commitPartLen = stream.parts.length
             if (stream.text.trim()) {
+              stream.savedLen = stream.text.length
               stream.savedMsgId = await this.saveAssistant(
                 conversationId, stream.text, stream.parts, undefined, stream.savedMsgId,
               )
@@ -277,6 +281,12 @@ export class AngelDO implements DurableObject {
             stream.tools = stream.parts
               .filter((p): p is Extract<StreamPart, { type: 'tool' }> => p.type === 'tool')
               .map(p => ({ id: p.id, name: p.name, label: p.label, result: p.result }))
+            // If a periodic save already flushed discarded text, overwrite it
+            // with the trimmed truth so an eviction can't resurrect it.
+            if (stream.savedMsgId && stream.savedLen > stream.text.length) {
+              await this.saveAssistant(conversationId, stream.text, stream.parts, undefined, stream.savedMsgId)
+            }
+            stream.savedLen = Math.min(stream.savedLen, stream.text.length)
             this.broadcast({ type: 'stream:reset', conversationId, seq: stream.seq, parts: stream.parts })
             break
           case 'tool_start':
@@ -297,7 +307,7 @@ export class AngelDO implements DurableObject {
           }
           case 'done':
             sawDone = true
-            this.log('info', 'stream:done', `textLen=${stream.text.length} parts=${stream.parts.length} usage=${event.usage?.input}/${event.usage?.output}`, agentId, conversationId)
+            this.log('info', 'stream:done', `textLen=${stream.text.length} parts=${stream.parts.length} usage=${event.usage?.input}/${event.usage?.output} finish=${event.finishReason ?? '?'}`, agentId, conversationId)
             stream.savedMsgId = await this.saveAssistant(
               conversationId, stream.text || '*(no response)*',
               stream.parts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined)),

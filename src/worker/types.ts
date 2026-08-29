@@ -209,5 +209,5 @@ export type AgentEvent =
   | { type: 'tool_result'; id: string; result: string; label: string }
   | { type: 'reset' } // a truncated attempt is being discarded; clear the current round's partial
   | { type: 'commit' } // the current round's text is final (a tool round follows)
-  | { type: 'done'; usage?: { input: number; output: number } }
+  | { type: 'done'; usage?: { input: number; output: number }; finishReason?: string | null }
   | { type: 'error'; message: string }
