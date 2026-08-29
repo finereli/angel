@@ -237,6 +237,7 @@ export class AngelDO implements DurableObject {
     this.activeStreams.set(conversationId, stream)
     await this.state.storage.put(`streaming:${conversationId}`, agentId)
     let sawDone = false
+    this.log('info', 'stream:start', `agent=${agentName}`, agentId, conversationId)
 
     try {
       for await (const event of runAgent({ env: this.env, conversationId, agentId, agentName }, content)) {
@@ -245,11 +246,19 @@ export class AngelDO implements DurableObject {
         switch (event.type) {
           case 'text': {
             stream.text += event.content
-            // Append to the current text part so tools stay where they were used.
             const last = stream.parts[stream.parts.length - 1]
             if (last && last.type === 'text') last.content += event.content
             else stream.parts.push({ type: 'text', content: event.content })
             this.broadcast({ type: 'text', conversationId, seq: stream.seq, content: event.content })
+            // Periodic save: flush to D1 every ~200 chars of unsaved text so a
+            // DO eviction doesn't lose the entire final round.
+            if (stream.text.length - stream.commitLen >= 200 && stream.text.trim()) {
+              stream.commitLen = stream.text.length
+              stream.commitPartLen = stream.parts.length
+              stream.savedMsgId = await this.saveAssistant(
+                conversationId, stream.text, stream.parts, undefined, stream.savedMsgId,
+              )
+            }
             break
           }
           case 'commit':
@@ -262,8 +271,7 @@ export class AngelDO implements DurableObject {
             }
             break
           case 'reset':
-            // Discard the truncated attempt's text AND any tools it announced,
-            // back to the last committed boundary, then hand the client the truth.
+            this.log('warn', 'stream:reset', `textLen=${stream.text.length} commitLen=${stream.commitLen}`, agentId, conversationId)
             stream.text = stream.text.slice(0, stream.commitLen)
             stream.parts = stream.parts.slice(0, stream.commitPartLen)
             stream.tools = stream.parts
@@ -289,6 +297,7 @@ export class AngelDO implements DurableObject {
           }
           case 'done':
             sawDone = true
+            this.log('info', 'stream:done', `textLen=${stream.text.length} parts=${stream.parts.length} usage=${event.usage?.input}/${event.usage?.output}`, agentId, conversationId)
             stream.savedMsgId = await this.saveAssistant(
               conversationId, stream.text || '*(no response)*',
               stream.parts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined)),
@@ -305,6 +314,7 @@ export class AngelDO implements DurableObject {
       // Stop: persist whatever we had so it isn't lost, and close the stream out.
       // Only if we didn't already save on `done` - avoids a double message.
       if (stream.aborted && !sawDone && stream.text.trim()) {
+        this.log('warn', 'stream:aborted', `textLen=${stream.text.length} savedMsgId=${stream.savedMsgId}`, agentId, conversationId)
         stream.parts.push({ type: 'text', content: '\n\n*(stopped)*' })
         await this.saveAssistant(conversationId, stream.text + '\n\n*(stopped)*', stream.parts, undefined, stream.savedMsgId)
         stream.seq++
@@ -312,9 +322,9 @@ export class AngelDO implements DurableObject {
       }
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : 'Agent error'
+      this.log('error', 'stream:error', `err=${errMsg} textLen=${stream.text.length} savedMsgId=${stream.savedMsgId}`, agentId, conversationId)
       stream.seq++
       this.broadcast({ type: 'error', conversationId, seq: stream.seq, message: errMsg })
-      // Keep any committed text (earlier rounds) rather than losing it to the error.
       const hadText = stream.text.trim().length > 0
       if (hadText) stream.parts.push({ type: 'text', content: `\n\n*(error: ${errMsg})*` })
       const finalContent = hadText ? `${stream.text}\n\n*(error: ${errMsg})*` : `*Error: ${errMsg}*`
@@ -542,6 +552,15 @@ export class AngelDO implements DurableObject {
     }
 
     await this.syncAlarm()
+  }
+
+  // --- Logging ---
+
+  private log(level: 'info' | 'warn' | 'error', event: string, detail?: string, agentId?: string, conversationId?: string) {
+    this.env.DB.prepare(
+      `INSERT INTO agent_logs (agent_id, conversation_id, level, event, detail) VALUES (?, ?, ?, ?, ?)`
+    ).bind(agentId || null, conversationId || null, level, event, detail || null).run().catch(() => {})
+    if (level === 'error') console.error(`[${event}]`, detail)
   }
 
   // --- WebSocket helpers ---
