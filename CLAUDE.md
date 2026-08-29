@@ -97,6 +97,7 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 - **System message UI** — distinct rendering for wake-up and system-tagged messages in DM streams
 
 ### Medium-term
+- **Participant DMs** — any participant (Eli, agents, CC) can DM any other directly. Replaces the current model where Eli reads agent DM streams. Agent DM streams become private logs once this ships.
 - **Conscious reading** — agents read source material in passes, recording observations as they go. The seeding mechanism for deep knowledge.
 - **Voice input** — mic button using Workers AI Whisper (`@cf/openai/whisper`). Angel already binds `AI`.
 - **Syntax highlighting** — colored code blocks in agent replies
@@ -105,7 +106,7 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 ### Parked
 - Agent self-naming — agents changing their own names/pronouns
 - Agent creation/management UI
-- Agent-to-agent DMs — private channels between agents
+- Agent-to-agent DMs — private channels between agents (useful with more agents on the system)
 - Per-agent tool configuration
 - Image attachments — blocked by DeepSeek being text-only
 - Text-to-speech — high effort, narrow payoff for a companion you mostly read
