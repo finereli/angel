@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { angel } from '../streamManager';
   import type { ConversationState } from '../streamManager';
-  import { renderMarkdown, dayKey, dateLabel } from '../util';
+  import { renderMarkdown, dayKey, dateLabel, timeLabel } from '../util';
 
   export let conversationId: string;
 
@@ -329,7 +329,7 @@
         {#if msg.role === 'user' && msg.content.startsWith('<system>')}
           <div class="message system">
             <span class="system-text">{msg.content.replace(/<\/?system>/g, '')}</span>
-            <span class="system-time">{new Date(msg.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+            <span class="system-time">{timeLabel(msg.created_at)}</span>
           </div>
         {:else if msg.role === 'user'}
           {@const uc = parseUserContent(msg.content)}

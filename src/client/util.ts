@@ -12,12 +12,16 @@ export function renderMarkdown(content: string): string {
   catch { return content }
 }
 
+function utc(ts: string): Date {
+  return new Date(ts.endsWith('Z') ? ts : ts + 'Z')
+}
+
 export function dayKey(ts: string): string {
-  return new Date(ts).toDateString()
+  return utc(ts).toDateString()
 }
 
 export function dateLabel(ts: string): string {
-  const d = new Date(ts)
+  const d = utc(ts)
   const today = new Date()
   const yest = new Date()
   yest.setDate(today.getDate() - 1)
@@ -28,7 +32,7 @@ export function dateLabel(ts: string): string {
 
 export function timeLabel(ts: string): string {
   try {
-    const d = new Date(ts + (ts.endsWith('Z') ? '' : 'Z'))
+    const d = utc(ts)
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   } catch { return '' }
 }
