@@ -215,6 +215,7 @@
     padding: 12px 16px;
     border-top: 1px solid var(--border);
     background: var(--bg-surface);
+    flex-shrink: 0;
   }
 
   .input-wrap {

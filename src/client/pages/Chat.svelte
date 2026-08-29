@@ -518,6 +518,7 @@
 
   .messages {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 16px;
     display: flex;
@@ -671,6 +672,7 @@
     padding: 12px 16px;
     border-top: 1px solid var(--border);
     background: var(--bg-surface);
+    flex-shrink: 0;
   }
 
   .input-wrap {
