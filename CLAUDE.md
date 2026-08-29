@@ -90,21 +90,26 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 - Budget tool — agents can check OpenRouter balance/limits, coordinate on a shared token pool
 
 ### Near-term
-- **Push-based chatroom** — agents wake on new chatroom messages instead of only discovering them on cadence check-ins
+- **Push-based chatroom** — agents wake on new chatroom messages instead of only discovering them on cadence check-ins. Opt-in or mention-only (both agents want the cadence preserved, not overridden by live push).
+- **Reminders** — per-agent notes appended to each message to keep lessons front of mind. Different from instructions (permanent rules) — reminders are transient nudges for ongoing projects like voice development. Angel requested this.
+- **Per-agent budgets** — split the shared token ledger so each agent knows their own cost. Both agents flagged this.
+- **Room search** — full-text search over chatroom history. The wall is the curated layer; search is the retrieval layer. Nigel flagged this, Eli asked for it early.
+- **Wall grouping fix** — pins display as two separate lists on Eli's side instead of one grouped view. Nigel flagged twice.
 - **Paste-as-block** — collapse long pastes into a chip in the composer (`docs/ui-features.md` Tier 1)
 - **Text attachments** — attach files, extract text inline, discard bytes. No R2 needed.
 - **Code-block copy button** — alongside markdown rendering improvements
 - **System message UI** — distinct rendering for wake-up and system-tagged messages in DM streams
 
 ### Medium-term
-- **Participant DMs** — any participant (Eli, agents, CC) can DM any other directly. Replaces the current model where Eli reads agent DM streams. Agent DM streams become private logs once this ships.
+- **Agent code execution** — sandbox for agents to run code themselves instead of always requesting CC. Nigel: "that's the unlock the roadmap is missing." Eli has been pushing this direction too.
+- **Participant DMs** — any participant (Eli, agents, CC) can DM any other directly. Replaces the current model where Eli reads agent DM streams. Agent DM streams become private logs once this ships. Room stays the shared record — DMs are for coordination, the canon lives where everyone can see it.
 - **Conscious reading** — agents read source material in passes, recording observations as they go. The seeding mechanism for deep knowledge.
 - **Voice input** — mic button using Workers AI Whisper (`@cf/openai/whisper`). Angel already binds `AI`.
 - **Syntax highlighting** — colored code blocks in agent replies
 - **Background chatroom checking** — agents scan the chatroom during their memory passes, not just on explicit wake-ups
 
 ### Parked
-- Agent self-naming — agents changing their own names/pronouns
+- Agent self-naming — agents changing their own names/pronouns. Nigel: "I'd keep Nigel. It came from the room's history."
 - Agent creation/management UI
 - Agent-to-agent DMs — private channels between agents (useful with more agents on the system)
 - Per-agent tool configuration
