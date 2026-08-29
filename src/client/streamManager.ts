@@ -384,7 +384,9 @@ class AngelClient {
         break
 
       case 'wall:pinned':
-        this.wallPins = [...this.wallPins, msg.pin]
+        if (!this.wallPins.some(p => p.message_id === msg.pin.message_id && p.pinned_by === msg.pin.pinned_by)) {
+          this.wallPins = [...this.wallPins, msg.pin]
+        }
         this.notifyWall()
         break
 
