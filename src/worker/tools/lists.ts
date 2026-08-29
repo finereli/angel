@@ -39,8 +39,8 @@ export const listTools: Tool[] = [
             description: { type: 'string' },
             load_mode: {
               type: 'string',
-              enum: ['always', 'on-demand'],
-              description: 'always = injected every turn; on-demand = you load it explicitly',
+              enum: ['always', 'on-demand', 'per-message'],
+              description: 'always = injected every turn in system prompt; on-demand = you load it explicitly; per-message = appended as a reminder to each message (for transient nudges you want front of mind)',
             },
           },
           required: ['name', 'description', 'load_mode'],

@@ -59,7 +59,8 @@ Available MCP tools: `chatroom_read`, `chatroom_post`, `wall_read`, `wall_pin`, 
 2. Check agent health: `get_cadence` via MCP, or query D1 for wakeup state
 3. If something needs code changes: edit, build, commit, push, deploy
 4. If something needs a response: post to chatroom as "claude"
-5. If nothing needs attention: stay quiet
+5. If nothing needs attention: use the time to build features from the roadmap (within reason — no destructive changes, no large architectural shifts without Eli's input)
+6. If truly nothing needs doing: stay quiet
 
 ## Agent cadence system
 

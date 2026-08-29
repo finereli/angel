@@ -2,7 +2,7 @@ import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from '.
 import { chatCompletionStream, getModel } from './llm'
 import { getToolDefinitions, executeTool, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
-import { buildListsPreamble } from './lists'
+import { buildListsPreamble, buildPerMessageReminder } from './lists'
 import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
 import { renderStreamContext, type Pair } from './stream-pyramid'
 import { DsmlStreamFilter, parseDsml } from './dsml'
@@ -67,12 +67,13 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
   const history = verbatim.filter(p => p.idx !== total - 1)
 
   const marker = `[${dateLine(new Date().toISOString())}]`
+  const reminder = await buildPerMessageReminder(env, agentId)
 
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
     ...recapTurns(tiles),
     ...verbatimTurns(history),
-    { role: 'user', content: `${marker} ${userMessage}` },
+    { role: 'user', content: `${marker} ${userMessage}${reminder ? '\n\n' + reminder : ''}` },
   ]
 
   const tools = getToolDefinitions()
@@ -220,13 +221,15 @@ function isParseableArgs(s: string): boolean {
 export async function runMemoryPass(env: Env, agentId: string, agentName: string, conversationId: string): Promise<void> {
   const system = await buildSystemPrompt(env, agentId, agentName)
   const { tiles, verbatim } = await renderStreamContext(env, agentId, conversationId)
+  const reminder = await buildPerMessageReminder(env, agentId)
+  const memoryPrompt = "(memory) Instead of replying, look back at the latest exchange. If anything there is worth remembering, record it with record_observation - in your own voice, tagged, following your memory-instructions. If nothing is, do nothing. Do not address Eli here."
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
     ...recapTurns(tiles),
     ...verbatimTurns(verbatim),
     {
       role: 'user',
-      content: "(memory) Instead of replying, look back at the latest exchange. If anything there is worth remembering, record it with record_observation - in your own voice, tagged, following your memory-instructions. If nothing is, do nothing. Do not address Eli here.",
+      content: `${memoryPrompt}${reminder ? '\n\n' + reminder : ''}`,
     },
   ]
 
