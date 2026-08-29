@@ -1,19 +1,18 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
-import { chatCompletionStream } from './llm'
+import { chatCompletionStream, getModel } from './llm'
 import { getToolDefinitions, executeTool, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble } from './lists'
 import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
 import { renderStreamContext, type Pair } from './stream-pyramid'
+import { DsmlStreamFilter, parseDsml } from './dsml'
 
 const MAX_TOOL_ROUNDS = 12
-const DSML_CHAR = '｜' // ｜ (fullwidth vertical line) — DeepSeek internal markup
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
-function stripDsmlMarkup(text: string): string {
-  const idx = text.indexOf('<' + DSML_CHAR)
-  return idx === -1 ? text : text.slice(0, idx).trimEnd()
+function isDeepSeek(env: Env): boolean {
+  return getModel(env).toLowerCase().includes('deepseek')
 }
 
 interface AgentContext {
@@ -88,8 +87,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     let truncated = false
     let finishReason: string | null = null
     const announced = new Set<string>() // tool ids already shown to the client
-    let dsmlDetected = false
-    let heldChar = '' // trailing '<' that might start '<｜'
+    const dsmlFilter = isDeepSeek(env) ? new DsmlStreamFilter() : null
 
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
     // telling the client to discard the truncated partial first. The provider's
@@ -105,8 +103,6 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         toolCallArgs = new Map<number, string>()
         finishReason = null
         announced.clear()
-        dsmlDetected = false
-        heldChar = ''
         await sleep(Math.min(600 * 2 ** (attempt - 1), 5000)) // 0.6s, 1.2s, 2.4s, 4.8s, 5s
       }
       try {
@@ -116,19 +112,11 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
           if (choice.finish_reason) finishReason = choice.finish_reason
           if (choice.delta.content) {
             assistantText += choice.delta.content
-            if (!dsmlDetected) {
-              let pending = heldChar + choice.delta.content
-              heldChar = ''
-              const fwIdx = pending.indexOf(DSML_CHAR)
-              if (fwIdx !== -1) {
-                dsmlDetected = true
-                const ltIdx = pending.lastIndexOf('<', fwIdx)
-                pending = (ltIdx >= 0 ? pending.slice(0, ltIdx) : pending.slice(0, fwIdx)).trimEnd()
-              } else if (pending.endsWith('<')) {
-                heldChar = '<'
-                pending = pending.slice(0, -1)
-              }
-              if (pending) yield { type: 'text', content: pending }
+            if (dsmlFilter) {
+              const safe = dsmlFilter.feed(choice.delta.content)
+              if (safe) yield { type: 'text', content: safe }
+            } else {
+              yield { type: 'text', content: choice.delta.content }
             }
           }
           if (choice.delta.tool_calls) {
@@ -162,19 +150,23 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
       }
     }
 
-    // Flush held '<' that wasn't DSML, and strip any DSML from saved text
-    if (!dsmlDetected && heldChar) yield { type: 'text', content: heldChar }
-    if (dsmlDetected) {
-      console.error(`[runAgent] stripped DeepSeek DSML markup from text output`)
-      assistantText = stripDsmlMarkup(assistantText)
+    // Finish the DSML stream filter: flush any held-back text that wasn't DSML,
+    // and recover tool calls from DSML markup the model emitted as plain text.
+    if (dsmlFilter) {
+      const { flush, toolCalls: dsmlCalls } = dsmlFilter.finish()
+      if (flush) yield { type: 'text', content: flush }
+      if (dsmlFilter.detected) {
+        const parsed = parseDsml(assistantText)
+        if (parsed) {
+          assistantText = parsed.cleanText
+          console.error(`[runAgent] recovered ${parsed.toolCalls.length} tool call(s) from DeepSeek DSML text`)
+        }
+        // Merge DSML-recovered calls into the structured ones
+        for (const tc of dsmlCalls) toolCalls.push(tc)
+      }
     }
 
     for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
-    // Keep every named call, well-formed or not. A call whose arguments never
-    // finished streaming (most often finish_reason=length: the output-token cap
-    // hit mid-call) used to be dropped silently here, ending the turn with
-    // "let me do X:" and no X. Now it gets an error tool-result instead, so the
-    // model sees the failure and reissues the call in the next round.
     const calls = toolCalls.filter(tc => tc && tc.function.name)
 
     if (calls.length === 0) {
@@ -264,7 +256,15 @@ export async function runMemoryPass(env: Env, agentId: string, agentName: string
       console.error('[runMemoryPass] stream failed:', e instanceof Error ? e.message : e)
     }
     for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
-    text = stripDsmlMarkup(text)
+    // Recover tool calls from DSML text (DeepSeek only)
+    if (isDeepSeek(env)) {
+      const parsed = parseDsml(text)
+      if (parsed) {
+        text = parsed.cleanText
+        for (const tc of parsed.toolCalls) toolCalls.push(tc)
+        console.error(`[runMemoryPass] recovered ${parsed.toolCalls.length} tool call(s) from DeepSeek DSML text`)
+      }
+    }
     const valid = toolCalls.filter(tc => tc && tc.function.name && isParseableArgs(tc.function.arguments))
     if (valid.length === 0) return
 
