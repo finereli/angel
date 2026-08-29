@@ -234,6 +234,7 @@
     flex-direction: column;
     min-height: 0;
     position: relative;
+    overflow: hidden;
   }
 
   /* Wall drawer */
