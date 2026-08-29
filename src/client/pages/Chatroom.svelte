@@ -16,6 +16,7 @@
 
   let messages: ChatroomMessageRow[] = [];
   let wallPins: WallPinRow[] = [];
+  let flashIds = new Set<number>();
 
   $: groupedPins = (() => {
     const map = new Map<number, GroupedPin>();
@@ -35,6 +36,7 @@
   let unsub: (() => void) | null = null;
   let wallUnsub: (() => void) | null = null;
   let userHasScrolledUp = false;
+  let roomLoaded = angel.isRoomLoaded();
 
   const DRAFT_KEY = 'angel-draft-chatroom';
 
@@ -55,6 +57,12 @@
     unsub = angel.onRoomUpdate(() => {
       const prev = messages;
       messages = angel.getRoomMessages();
+      roomLoaded = angel.isRoomLoaded();
+      const newIds = angel.consumeNewRoomIds();
+      if (newIds.size > 0) {
+        flashIds = newIds;
+        setTimeout(() => { flashIds = new Set(); }, 2000);
+      }
       if (messages.length > prev.length && !userHasScrolledUp) {
         tick().then(scrollToBottom);
       }
@@ -62,8 +70,9 @@
     wallUnsub = angel.onWallUpdate(() => {
       wallPins = angel.getWallPins();
     });
-    angel.loadRoom();
-    angel.loadWall();
+    messages = angel.getRoomMessages();
+    wallPins = angel.getWallPins();
+    roomLoaded = angel.isRoomLoaded();
     loadDraft();
     tick().then(scrollToBottom);
   });
@@ -194,7 +203,7 @@
       {#if i === 0 || dayKey(msg.created_at) !== dayKey(messages[i - 1].created_at)}
         <div class="date-line"><span>{dateLabel(msg.created_at)}</span></div>
       {/if}
-      <div class="room-msg" class:own={msg.author === 'eli'} class:on-wall={angel.isOnWall(msg.id)} data-msg-id={msg.id}>
+      <div class="room-msg" class:own={msg.author === 'eli'} class:on-wall={angel.isOnWall(msg.id)} class:new-flash={flashIds.has(msg.id)} data-msg-id={msg.id}>
         <div class="msg-header">
           <span class="author-tag" style="--author-color: {authorColor(msg.author)}">
             {authorLabel(msg.author)}
@@ -209,7 +218,9 @@
         </div>
       </div>
     {/each}
-    {#if messages.length === 0}
+    {#if !roomLoaded}
+      <div class="empty-room">Loading…</div>
+    {:else if messages.length === 0}
       <div class="empty-room">No messages yet</div>
     {/if}
   </div>
@@ -450,6 +461,14 @@
   }
   @keyframes flash {
     0%, 20% { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+    100% { background: transparent; }
+  }
+
+  .room-msg.new-flash {
+    animation: gentle-flash 2s ease-out;
+  }
+  @keyframes gentle-flash {
+    0% { background: color-mix(in srgb, var(--accent) 12%, transparent); }
     100% { background: transparent; }
   }
 

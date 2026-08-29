@@ -37,6 +37,8 @@ class AngelClient {
   private docListeners = new Set<DocListener>()
   private roomListeners = new Set<RoomListener>()
   private roomMessages: ChatroomMessageRow[] = []
+  private roomLoaded = false
+  private newRoomIds = new Set<number>()
   private wallListeners = new Set<RoomListener>()
   private wallPins: WallPinRow[] = []
   private reconnectDelay = 1000
@@ -51,6 +53,12 @@ class AngelClient {
   getAgents(): AgentInfo[] { return this.agents }
   hasLoadedAgents(): boolean { return this.agentsLoaded }
   getRoomMessages(): ChatroomMessageRow[] { return this.roomMessages }
+  isRoomLoaded(): boolean { return this.roomLoaded }
+  consumeNewRoomIds(): Set<number> {
+    const ids = this.newRoomIds
+    this.newRoomIds = new Set()
+    return ids
+  }
   getWallPins(): WallPinRow[] { return this.wallPins }
 
   getConvState(id: string): ConversationState {
@@ -116,6 +124,7 @@ class AngelClient {
     this.stopPing()
     this.clearReconnectTimer()
     this.loadedConversations.clear()
+    this.roomLoaded = false
     if (this.ws) {
       this.ws.close(1000, 'Client disconnect')
       this.ws = null
@@ -211,6 +220,8 @@ class AngelClient {
             this.send({ type: 'conv:load', conversationId: agent.conversationId })
           }
         }
+        this.send({ type: 'room:load' })
+        this.send({ type: 'wall:load' })
         this.notify()
         break
       }
@@ -351,10 +362,16 @@ class AngelClient {
         break
       }
 
-      case 'room:messages':
+      case 'room:messages': {
+        const prevIds = new Set(this.roomMessages.map(m => m.id))
         this.roomMessages = msg.messages
+        this.roomLoaded = true
+        if (prevIds.size > 0) {
+          this.newRoomIds = new Set(msg.messages.filter(m => !prevIds.has(m.id)).map(m => m.id))
+        }
         this.notifyRoom()
         break
+      }
 
       case 'room:new':
         this.roomMessages = [...this.roomMessages, msg.message]
