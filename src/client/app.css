@@ -40,12 +40,16 @@
 }
 
 html, body {
+  height: 100%;
+  overflow: hidden;
   overscroll-behavior: none;
 }
 
 body {
   background: var(--bg-surface);
   color: var(--text-primary);
+  position: fixed;
+  width: 100%;
 }
 
 /* Shared prose styles for markdown rendering (Chat + Chatroom) */

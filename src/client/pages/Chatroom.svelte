@@ -142,28 +142,18 @@
       <div class="drawer-body">
         {#each wallPins as pin (pin.id)}
           <div class="wall-pin">
-            <div class="pin-meta">
-              <span class="pin-icon">&#x1f4cc;</span>
-              pinned by <strong>{authorLabel(pin.pinned_by)}</strong>{#if pin.reason} &mdash; <em>{pin.reason}</em>{/if}
-            </div>
-            <div class="pinned-msg-body">
-              <div class="msg-header">
-                <span class="author-tag" style="--author-color: {authorColor(pin.author)}">
-                  {authorLabel(pin.author)}
-                </span>
-                <span class="msg-time">{timeLabel(pin.message_created_at)}</span>
-                <div class="pin-actions">
-                  <button class="action-btn jump-btn" on:click={() => scrollToMessage(pin.message_id)} title="Jump to message">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
-                  </button>
-                  <button class="action-btn unpin-btn" on:click={() => angel.unpinFromWall(pin.message_id)} title="Unpin">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                  </button>
-                </div>
-              </div>
-              <div class="msg-body prose pinned-content">
-                {@html renderMarkdown(pin.content)}
-              </div>
+            <div class="pin-reason">{pin.reason || pin.content.slice(0, 120)}</div>
+            <div class="pin-foot">
+              <button class="pin-source" on:click={() => scrollToMessage(pin.message_id)} title="Jump to message">
+                <span class="source-author" style="--author-color: {authorColor(pin.author)}">{authorLabel(pin.author)}</span>
+                <span class="source-sep">&middot;</span>
+                <span class="source-time">{timeLabel(pin.message_created_at)}</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <span class="pin-by">pinned by {authorLabel(pin.pinned_by)}</span>
+              <button class="action-btn unpin-btn" on:click={() => angel.unpinFromWall(pin.message_id)} title="Unpin">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
           </div>
         {/each}
@@ -251,7 +241,7 @@
     right: 0;
     max-height: 70%;
     z-index: 11;
-    background: var(--bg-surface);
+    background: var(--bg-sidebar);
     border-bottom: 1px solid var(--border);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
     display: flex;
@@ -286,10 +276,10 @@
 
   .drawer-body {
     overflow-y: auto;
-    padding: 12px 16px;
+    padding: 8px 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 4px;
   }
 
   .empty-wall {
@@ -300,78 +290,84 @@
   }
 
   .wall-pin {
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    overflow: hidden;
+    padding: 10px 12px;
+    border-left: 2px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+  }
+  .wall-pin:hover {
+    background: var(--bg-hover);
   }
 
-  .pin-meta {
-    padding: 5px 12px;
-    background: var(--bg-hover);
+  .pin-reason {
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+  }
+
+  .pin-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 0.72rem;
     color: var(--text-secondary);
-    line-height: 1.4;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .pin-icon {
-    font-size: 0.65rem;
-    margin-right: 4px;
-  }
-  .pin-meta strong {
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-  .pin-meta em {
-    font-style: italic;
   }
 
-  .pinned-msg-body {
-    padding: 8px 12px;
+  .pin-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: none;
+    background: none;
+    padding: 0;
+    cursor: pointer;
+    font-size: inherit;
+    color: var(--text-secondary);
+    line-height: 1;
+  }
+  .pin-source:hover {
+    color: var(--accent);
+  }
+  .pin-source svg {
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .pin-source:hover svg {
+    opacity: 1;
   }
 
-  .pinned-content {
-    max-height: 4.5em;
-    overflow: hidden;
-    position: relative;
-    font-size: 0.88rem;
-  }
-  .pinned-content::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 1.5em;
-    background: linear-gradient(transparent, var(--bg-surface));
-    pointer-events: none;
+  .source-author {
+    color: var(--author-color, var(--text-secondary));
+    font-weight: 500;
   }
 
-  .pin-actions {
-    display: flex;
-    gap: 2px;
+  .pin-by {
     margin-left: auto;
-    flex-shrink: 0;
+    opacity: 0.6;
   }
+
   .action-btn {
     border: none;
     background: none;
     color: var(--text-secondary);
     cursor: pointer;
-    padding: 4px;
+    padding: 2px;
     border-radius: 4px;
-    opacity: 0.4;
+    opacity: 0;
     transition: opacity 0.15s;
   }
+  .wall-pin:hover .action-btn {
+    opacity: 0.4;
+  }
   .action-btn:hover {
-    opacity: 1;
-    background: var(--bg-hover);
+    opacity: 1 !important;
+    background: var(--bg-active);
   }
 
   /* Messages */
   .messages {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 16px;
