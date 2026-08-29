@@ -36,8 +36,10 @@ export class AngelDO implements DurableObject {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
-    // On construction (DO wake), recalculate the alarm in case one is pending.
-    this.state.blockConcurrencyWhile(() => this.syncAlarm().catch(e => console.error('[syncAlarm] init failed:', e)))
+    this.state.blockConcurrencyWhile(async () => {
+      await this.syncAlarm().catch(e => console.error('[syncAlarm] init failed:', e))
+      await this.resumeInterrupted().catch(e => console.error('[resumeInterrupted] init failed:', e))
+    })
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -233,6 +235,7 @@ export class AngelDO implements DurableObject {
       conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, tools: [], parts: [], aborted: false, savedMsgId: null,
     }
     this.activeStreams.set(conversationId, stream)
+    await this.state.storage.put(`streaming:${conversationId}`, agentId)
     let sawDone = false
 
     try {
@@ -318,6 +321,7 @@ export class AngelDO implements DurableObject {
       await this.saveAssistant(conversationId, finalContent, hadText ? stream.parts : undefined, undefined, stream.savedMsgId).catch(() => {})
     } finally {
       this.activeStreams.delete(conversationId)
+      await this.state.storage.delete(`streaming:${conversationId}`)
     }
 
     return stream.text
@@ -404,6 +408,70 @@ export class AngelDO implements DurableObject {
       created_at: new Date().toISOString(),
     }
     this.broadcast({ type: 'room:new', message: msg })
+  }
+
+  // --- Restart recovery ---
+
+  private async resumeInterrupted(): Promise<void> {
+    const stored = await this.state.storage.list<string>({ prefix: 'streaming:' })
+    if (stored.size === 0) return
+
+    // Collect interrupted agents and clear the flags synchronously (inside
+    // blockConcurrencyWhile), then kick off responses asynchronously so we
+    // don't block the fetch that woke the DO.
+    const interrupted: Array<{ conversationId: string; agentId: string }> = []
+    for (const [key, agentId] of stored) {
+      interrupted.push({ conversationId: key.slice('streaming:'.length), agentId })
+      await this.state.storage.delete(key)
+    }
+
+    // Fire the actual recovery outside blockConcurrencyWhile
+    setTimeout(() => this.runRecovery(interrupted), 0)
+  }
+
+  private async runRecovery(interrupted: Array<{ conversationId: string; agentId: string }>): Promise<void> {
+    for (const { conversationId, agentId } of interrupted) {
+      try {
+        const agent = await this.env.DB.prepare(
+          `SELECT name FROM agents WHERE id = ?`
+        ).bind(agentId).first<{ name: string }>()
+        if (!agent) continue
+
+        const sysContent = '<system>You were interrupted mid-response by a restart. Review the conversation and continue where you left off.</system>'
+
+        const result = await this.env.DB.prepare(
+          `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
+        ).bind(conversationId, sysContent).run()
+        await this.env.DB.prepare(
+          `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
+        ).bind(conversationId).run()
+
+        this.broadcast({
+          type: 'msg:user',
+          conversationId,
+          clientMsgId: `restart-${agentId}-${Date.now()}`,
+          messageId: result.meta.last_row_id,
+          content: sysContent,
+        })
+
+        const respLink = this.responseChain.then(
+          () => this.streamResponse(conversationId, agentId, agent.name, sysContent)
+        )
+        this.responseChain = respLink.then(() => {}, () => {})
+        let assistantText = ''
+        try { assistantText = await respLink }
+        catch (e) { console.error('[resumeInterrupted] response failed:', e instanceof Error ? e.message : e) }
+
+        const memLink = this.memoryChain.then(
+          () => this.postStreamWork(conversationId, agentId, agent.name, sysContent, assistantText)
+        )
+        this.memoryChain = memLink.then(() => {}, () => {})
+        try { await memLink }
+        catch (e) { console.error('[resumeInterrupted] memory failed:', e instanceof Error ? e.message : e) }
+      } catch (e) {
+        console.error('[resumeInterrupted] failed for', agentId, e instanceof Error ? e.message : e)
+      }
+    }
   }
 
   // --- Alarm: agent wake-ups ---

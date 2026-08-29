@@ -45,6 +45,28 @@ export const wakeupTools: Tool[] = [
     def: {
       type: 'function',
       function: {
+        name: 'check_wakeup',
+        description: 'Check if you have a pending wake-up scheduled.',
+        parameters: { type: 'object', properties: {} },
+      },
+    },
+    label: ['Checking wake-up', 'Checked wake-up'],
+    run: async (ctx) => {
+      const row = await ctx.env.DB.prepare(
+        `SELECT wake_at, reason FROM agent_wakeups WHERE agent_id = ?`
+      ).bind(ctx.agentId).first<{ wake_at: string; reason: string | null }>()
+      if (!row) return 'No wake-up scheduled.'
+      const wake = new Date(row.wake_at.endsWith('Z') ? row.wake_at : row.wake_at + 'Z')
+      const mins = Math.max(0, Math.round((wake.getTime() - Date.now()) / 60_000))
+      const timeStr = wake.toISOString()
+      if (mins <= 0) return `Wake-up is due now (${timeStr}).${row.reason ? ` Reason: ${row.reason}` : ''}`
+      return `Wake-up in ${mins} minute${mins === 1 ? '' : 's'} (${timeStr}).${row.reason ? ` Reason: ${row.reason}` : ''}`
+    },
+  },
+  {
+    def: {
+      type: 'function',
+      function: {
         name: 'cancel_wakeup',
         description: 'Cancel your pending wake-up, if any.',
         parameters: { type: 'object', properties: {} },
