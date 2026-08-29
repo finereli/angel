@@ -51,8 +51,12 @@
     });
   }
 
+  function isMobile(): boolean {
+    return window.matchMedia('(max-width: 1024px)').matches || 'ontouchstart' in window;
+  }
+
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isMobile()) {
       e.preventDefault();
       sendMessage();
     }
