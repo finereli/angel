@@ -130,6 +130,12 @@ export class AngelDO implements DurableObject {
       }
     }
 
+      if (url.pathname === '/api/sync-alarm') {
+        await this.syncAlarm()
+        return Response.json({ ok: true })
+      }
+    }
+
     return new Response('Not found', { status: 404 })
   }
 
@@ -606,6 +612,22 @@ export class AngelDO implements DurableObject {
   // --- Alarm: agent wake-ups ---
 
   private async syncAlarm(): Promise<void> {
+    // Bootstrap: ensure agents with cadence have a wakeup row
+    const orphans = await this.env.DB.prepare(
+      `SELECT a.id as agent_id, a.cadence_minutes
+       FROM agents a
+       LEFT JOIN agent_wakeups w ON w.agent_id = a.id
+       WHERE a.cadence_minutes IS NOT NULL AND a.cadence_minutes > 0 AND w.agent_id IS NULL`
+    ).all<{ agent_id: string; cadence_minutes: number }>()
+
+    for (const o of orphans.results) {
+      const nextWake = new Date(Date.now() + o.cadence_minutes * 60_000).toISOString()
+      await this.env.DB.prepare(
+        `INSERT INTO agent_wakeups (agent_id, wake_at, reason)
+         VALUES (?, ?, 'cadence check-in')`
+      ).bind(o.agent_id, nextWake).run()
+    }
+
     const next = await this.env.DB.prepare(
       `SELECT wake_at FROM agent_wakeups ORDER BY wake_at ASC LIMIT 1`
     ).first<{ wake_at: string }>()
@@ -623,18 +645,28 @@ export class AngelDO implements DurableObject {
   async alarm(): Promise<void> {
     const now = new Date().toISOString()
     const due = await this.env.DB.prepare(
-      `SELECT w.agent_id, w.reason, a.name as agent_name, c.id as conversation_id
+      `SELECT w.agent_id, w.reason, a.name as agent_name, a.cadence_minutes, c.id as conversation_id
        FROM agent_wakeups w
        JOIN agents a ON a.id = w.agent_id
        JOIN conversations c ON c.agent_id = w.agent_id
        WHERE w.wake_at <= ?
        ORDER BY w.wake_at ASC`
-    ).bind(now).all<{ agent_id: string; reason: string | null; agent_name: string; conversation_id: string }>()
+    ).bind(now).all<{ agent_id: string; reason: string | null; agent_name: string; cadence_minutes: number | null; conversation_id: string }>()
 
     for (const row of due.results) {
       await this.env.DB.prepare(
         `DELETE FROM agent_wakeups WHERE agent_id = ?`
       ).bind(row.agent_id).run()
+
+      // Auto-schedule next cadence-driven wakeup before running the agent
+      if (row.cadence_minutes && row.cadence_minutes > 0) {
+        const nextWake = new Date(Date.now() + row.cadence_minutes * 60_000).toISOString()
+        await this.env.DB.prepare(
+          `INSERT INTO agent_wakeups (agent_id, wake_at, reason)
+           VALUES (?, ?, 'cadence check-in')
+           ON CONFLICT(agent_id) DO UPDATE SET wake_at = excluded.wake_at, reason = excluded.reason, created_at = datetime('now')`
+        ).bind(row.agent_id, nextWake).run()
+      }
 
       const reason = row.reason || 'scheduled check-in'
       const sysContent = `<system>Wake up — ${reason}</system>`
@@ -668,6 +700,22 @@ export class AngelDO implements DurableObject {
       this.memoryChain = memLink.then(() => {}, () => {})
       try { await memLink }
       catch (e) { console.error('[alarm] memory failed:', e instanceof Error ? e.message : e) }
+    }
+
+    // Also check for agents with cadence but no wakeup scheduled (bootstrap)
+    const orphans = await this.env.DB.prepare(
+      `SELECT a.id as agent_id, a.cadence_minutes
+       FROM agents a
+       LEFT JOIN agent_wakeups w ON w.agent_id = a.id
+       WHERE a.cadence_minutes IS NOT NULL AND a.cadence_minutes > 0 AND w.agent_id IS NULL`
+    ).all<{ agent_id: string; cadence_minutes: number }>()
+
+    for (const o of orphans.results) {
+      const nextWake = new Date(Date.now() + o.cadence_minutes * 60_000).toISOString()
+      await this.env.DB.prepare(
+        `INSERT INTO agent_wakeups (agent_id, wake_at, reason)
+         VALUES (?, ?, 'cadence check-in')`
+      ).bind(o.agent_id, nextWake).run()
     }
 
     await this.syncAlarm()

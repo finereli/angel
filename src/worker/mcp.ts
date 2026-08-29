@@ -71,6 +71,23 @@ const MCP_TOOLS = [
       required: ['message_id'],
     },
   },
+  {
+    name: 'set_cadence',
+    description: 'Set the recurring wake-up cadence for an agent. The agent will automatically wake up at this interval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_name: { type: 'string', description: 'Name of the agent (e.g. "angel", "nigel")' },
+        minutes: { type: 'number', description: 'Minutes between automatic wake-ups. Minimum 5, or 0 to disable.' },
+      },
+      required: ['agent_name', 'minutes'],
+    },
+  },
+  {
+    name: 'get_cadence',
+    description: 'Check the cadence setting for all agents.',
+    inputSchema: { type: 'object', properties: {} },
+  },
 ]
 
 function doStub(env: Env) {
@@ -155,6 +172,53 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       }))
       const data = await res.json() as { removed: boolean }
       return { text: data.removed ? `Unpinned message #${messageId}.` : `You don't have a pin on message #${messageId}.` }
+    }
+
+    case 'set_cadence': {
+      const agentName = (args.agent_name as string || '').trim().toLowerCase()
+      const raw = Math.round(Number(args.minutes) || 0)
+      if (!agentName) return { text: 'agent_name is required.', isError: true }
+      const agent = await env.DB.prepare(`SELECT id FROM agents WHERE lower(name) = ?`).bind(agentName).first<{ id: string }>()
+      if (!agent) return { text: `No agent named "${agentName}".`, isError: true }
+      if (raw === 0) {
+        await env.DB.prepare(`UPDATE agents SET cadence_minutes = NULL WHERE id = ?`).bind(agent.id).run()
+        return { text: `Cadence disabled for ${agentName}.` }
+      }
+      const minutes = Math.max(5, raw)
+      await env.DB.prepare(`UPDATE agents SET cadence_minutes = ? WHERE id = ?`).bind(minutes, agent.id).run()
+      // Ensure a wakeup is scheduled
+      const existing = await env.DB.prepare(`SELECT agent_id FROM agent_wakeups WHERE agent_id = ?`).bind(agent.id).first()
+      if (!existing) {
+        const nextWake = new Date(Date.now() + minutes * 60_000).toISOString()
+        await env.DB.prepare(
+          `INSERT INTO agent_wakeups (agent_id, wake_at, reason) VALUES (?, ?, 'cadence check-in')`
+        ).bind(agent.id, nextWake).run()
+      }
+      const stub = doStub(env)
+      await stub.fetch(new Request('http://do/api/sync-alarm', { method: 'POST' }))
+      return { text: `Cadence set to every ${minutes} minutes for ${agentName}.` }
+    }
+
+    case 'get_cadence': {
+      const rows = await env.DB.prepare(
+        `SELECT a.name, a.cadence_minutes, w.wake_at
+         FROM agents a
+         LEFT JOIN agent_wakeups w ON w.agent_id = a.id
+         ORDER BY a.name`
+      ).all<{ name: string; cadence_minutes: number | null; wake_at: string | null }>()
+      const agents = rows.results || []
+      if (agents.length === 0) return { text: 'No agents.' }
+      const lines = agents.map(a => {
+        const cadence = a.cadence_minutes ? `every ${a.cadence_minutes}min` : 'none'
+        let next = 'no wakeup scheduled'
+        if (a.wake_at) {
+          const wake = new Date(a.wake_at.endsWith('Z') ? a.wake_at : a.wake_at + 'Z')
+          const mins = Math.max(0, Math.round((wake.getTime() - Date.now()) / 60_000))
+          next = mins <= 0 ? 'due now' : `in ${mins}min`
+        }
+        return `${a.name}: cadence=${cadence}, next=${next}`
+      })
+      return { text: lines.join('\n') }
     }
 
     default:
