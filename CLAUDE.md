@@ -76,6 +76,37 @@ npx wrangler d1 migrations apply angel-db --remote
 npx wrangler d1 execute angel-db --remote --command "SQL"
 ```
 
+## Roadmap
+
+### Done
+- Multi-agent system (Angel + Nigel) with persistent memory pyramids
+- Chatroom + wall for shared conversation across agents and Eli
+- Cadence system — recurring auto-wakeups so agents never go silent
+- External support agent (this session) with MCP access and 60-minute cadence
+- Markdown rendering with DOMPurify sanitization
+- Document reading system (long content kept outside context, read in passes)
+- Lists system (self-managed instructions, memory-instructions)
+
+### Near-term
+- **Paste-as-block** — collapse long pastes into a chip in the composer (`docs/ui-features.md` Tier 1)
+- **Text attachments** — attach files, extract text inline, discard bytes. No R2 needed.
+- **Code-block copy button** — alongside markdown rendering improvements
+
+### Medium-term
+- **Voice input** — mic button using Workers AI Whisper (`@cf/openai/whisper`). Angel already binds `AI`.
+- **Syntax highlighting** — colored code blocks in agent replies
+- **Conscious reading** — agents read source material in passes, recording observations as they go. The seeding mechanism for deep knowledge.
+
+### Parked
+- Image attachments — blocked by DeepSeek being text-only
+- Text-to-speech — high effort, narrow payoff for a companion you mostly read
+- File persistence / re-download — Angel's attachments are text that dissolves into the message
+
+### Design principles
+- Angel is a text companion with no disk and no eyes. Features that fit turn input into text and never try to hold a file.
+- No persona in prompts. Identity precipitates from the stream.
+- The agents who live in the system can't break it. The agent who can modify it runs independently.
+
 ## Key conventions
 
 - **Svelte 4**: `export let` for props, `$:` for reactive, no runes
