@@ -72,6 +72,52 @@ export class AngelDO implements DurableObject {
       return new Response(null, { status: 101, webSocket: client })
     }
 
+    // Internal HTTP API for MCP server writes (triggers WebSocket broadcast)
+    if (request.method === 'POST') {
+      if (url.pathname === '/api/room/post') {
+        const { author, content } = await request.json() as { author: string; content: string }
+        const clean = (content || '').trim()
+        if (!clean) return Response.json({ error: 'empty' }, { status: 400 })
+        const result = await this.env.DB.prepare(
+          `INSERT INTO chatroom_messages (author, content) VALUES (?, ?)`
+        ).bind(author, clean).run()
+        const msg: ChatroomMessageRow = {
+          id: result.meta.last_row_id, author, content: clean,
+          created_at: new Date().toISOString(),
+        }
+        this.broadcast({ type: 'room:new', message: msg })
+        return Response.json({ ok: true, message: msg })
+      }
+      if (url.pathname === '/api/wall/pin') {
+        const { messageId, pinnedBy, reason } = await request.json() as { messageId: number; pinnedBy: string; reason: string }
+        try {
+          await this.env.DB.prepare(
+            `INSERT INTO wall_pins (message_id, pinned_by, reason) VALUES (?, ?, ?)`
+          ).bind(messageId, pinnedBy, reason || '').run()
+        } catch (e: unknown) {
+          if (e instanceof Error && e.message.includes('UNIQUE'))
+            return Response.json({ error: 'already pinned' }, { status: 409 })
+          throw e
+        }
+        const row = await this.env.DB.prepare(
+          `SELECT w.id, w.message_id, w.pinned_by, w.reason, w.created_at,
+                  m.author, m.content, m.created_at AS message_created_at
+           FROM wall_pins w JOIN chatroom_messages m ON m.id = w.message_id
+           WHERE w.message_id = ?`
+        ).bind(messageId).first<WallPinRow>()
+        if (row) this.broadcast({ type: 'wall:pinned', pin: row })
+        return Response.json({ ok: true, pin: row })
+      }
+      if (url.pathname === '/api/wall/unpin') {
+        const { messageId } = await request.json() as { messageId: number }
+        const result = await this.env.DB.prepare(
+          `DELETE FROM wall_pins WHERE message_id = ?`
+        ).bind(messageId).run()
+        if (result.meta.changes) this.broadcast({ type: 'wall:unpinned', messageId })
+        return Response.json({ ok: true, removed: !!result.meta.changes })
+      }
+    }
+
     return new Response('Not found', { status: 404 })
   }
 

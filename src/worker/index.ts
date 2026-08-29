@@ -1,5 +1,14 @@
 import { Hono } from 'hono'
 import type { Env } from './types'
+import {
+  protectedResourceMetadata,
+  authServerMetadata,
+  oauthRegister,
+  oauthAuthorizeGet,
+  oauthAuthorizePost,
+  oauthToken,
+} from './oauth'
+import { mcpHandler } from './mcp'
 
 export { AngelDO } from './durable-object'
 
@@ -15,6 +24,17 @@ app.get('/ws', async (c) => {
 
 // Health check (no auth)
 app.get('/api/health', (c) => c.json({ ok: true, name: 'Angel' }))
+
+// OAuth 2.1 discovery + endpoints
+app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata)
+app.get('/.well-known/oauth-authorization-server', authServerMetadata)
+app.post('/oauth/register', oauthRegister)
+app.get('/oauth/authorize', oauthAuthorizeGet)
+app.post('/oauth/authorize', oauthAuthorizePost)
+app.post('/oauth/token', oauthToken)
+
+// MCP (Streamable HTTP)
+app.post('/mcp', mcpHandler)
 
 export default {
   fetch: app.fetch,
