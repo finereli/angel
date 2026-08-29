@@ -408,7 +408,7 @@
             {#if waitingOnApi}
               <div class="tool-row waiting">
                 <span class="tool-spinner"></span>
-                Waiting on the model ({formatElapsed(elapsedSeconds)})
+                Working ({formatElapsed(elapsedSeconds)})
               </div>
             {/if}
           </div>
