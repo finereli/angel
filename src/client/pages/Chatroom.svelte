@@ -11,6 +11,21 @@
   let unsub: (() => void) | null = null;
   let userHasScrolledUp = false;
 
+  const DRAFT_KEY = 'angel-draft-chatroom';
+
+  function saveDraft() {
+    if (messageText.trim()) {
+      localStorage.setItem(DRAFT_KEY, messageText);
+    } else {
+      localStorage.removeItem(DRAFT_KEY);
+    }
+  }
+
+  function loadDraft() {
+    messageText = localStorage.getItem(DRAFT_KEY) || '';
+    tick().then(autoResize);
+  }
+
   onMount(() => {
     unsub = angel.onRoomUpdate(() => {
       const prev = messages;
@@ -20,11 +35,13 @@
       }
     });
     angel.loadRoom();
+    loadDraft();
     tick().then(scrollToBottom);
   });
 
   onDestroy(() => {
     unsub?.();
+    saveDraft();
   });
 
   function scrollToBottom() {
@@ -44,6 +61,7 @@
     if (!text) return;
     angel.postToRoom(text);
     messageText = '';
+    localStorage.removeItem(DRAFT_KEY);
     userHasScrolledUp = false;
     tick().then(() => {
       autoResize();
@@ -65,7 +83,9 @@
   function autoResize() {
     if (!textareaEl) return;
     textareaEl.style.height = 'auto';
-    textareaEl.style.height = Math.min(textareaEl.scrollHeight, 168) + 'px';
+    const clamped = Math.min(textareaEl.scrollHeight, 168);
+    textareaEl.style.height = clamped + 'px';
+    textareaEl.style.overflowY = textareaEl.scrollHeight > 168 ? 'auto' : 'hidden';
   }
 
   function authorColor(author: string): string {
@@ -116,7 +136,7 @@
         bind:this={textareaEl}
         bind:value={messageText}
         on:keydown={handleKeydown}
-        on:input={autoResize}
+        on:input={() => { autoResize(); saveDraft(); }}
         placeholder="Post to chatroom..."
         rows="1"
       ></textarea>
@@ -142,6 +162,7 @@
   .messages {
     flex: 1;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 16px;
     display: flex;
     flex-direction: column;
@@ -237,6 +258,7 @@
     line-height: 1.5;
     max-height: 168px;
     overflow-y: hidden;
+    overscroll-behavior: contain;
   }
   textarea:focus {
     outline: none;

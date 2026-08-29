@@ -520,6 +520,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 16px;
     display: flex;
     flex-direction: column;
@@ -821,6 +822,7 @@
     line-height: 1.5;
     max-height: 168px;
     overflow-y: hidden;
+    overscroll-behavior: contain;
   }
   textarea:focus {
     outline: none;

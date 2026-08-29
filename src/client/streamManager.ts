@@ -43,6 +43,7 @@ class AngelClient {
   private pongTimeout: ReturnType<typeof setTimeout> | null = null
   private pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
   private agentsLoaded = false
+  private loadedConversations = new Set<string>()
 
   getConnState(): ConnState { return this.connState }
   getAgents(): AgentInfo[] { return this.agents }
@@ -100,6 +101,7 @@ class AngelClient {
     this.connState = 'disconnected'
     this.stopPing()
     this.clearReconnectTimer()
+    this.loadedConversations.clear()
     if (this.ws) {
       this.ws.close(1000, 'Client disconnect')
       this.ws = null
@@ -140,6 +142,7 @@ class AngelClient {
 
     this.ws.onclose = () => {
       this.stopPing()
+      this.loadedConversations.clear()
       if (this.connState !== 'disconnected') {
         this.connState = 'reconnecting'
         this.notify()
@@ -188,6 +191,12 @@ class AngelClient {
             content: this.pendingSend.content,
           })
         }
+        // Eagerly load all conversations so switching is instant
+        for (const agent of msg.agents) {
+          if (!this.loadedConversations.has(agent.conversationId)) {
+            this.send({ type: 'conv:load', conversationId: agent.conversationId })
+          }
+        }
         this.notify()
         break
       }
@@ -207,6 +216,7 @@ class AngelClient {
       case 'conv:messages': {
         const state = this.getConvState(msg.conversationId)
         state.messages = msg.messages
+        this.loadedConversations.add(msg.conversationId)
         if (msg.stream) {
           state.streamState = 'streaming'
           if (!state.streamStartTime) state.streamStartTime = Date.now()
@@ -417,6 +427,11 @@ class AngelClient {
   }
 
   loadConversation(id: string) {
+    if (this.loadedConversations.has(id)) {
+      // Already loaded — serve from cache, notify to trigger re-render
+      this.notify()
+      return
+    }
     this.send({ type: 'conv:load', conversationId: id })
   }
 
