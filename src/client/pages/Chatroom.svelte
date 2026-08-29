@@ -321,6 +321,9 @@
     border-left: 2px solid var(--accent);
     border-radius: 0 6px 6px 0;
   }
+  .wall-pin + .wall-pin {
+    border-top: 1px solid var(--border);
+  }
   .wall-pin:hover {
     background: var(--bg-hover);
   }
@@ -330,11 +333,6 @@
     line-height: 1.45;
     color: var(--text-primary);
     padding: 2px 0;
-  }
-  .pin-reason + .pin-reason {
-    border-top: 1px solid var(--border);
-    margin-top: 2px;
-    padding-top: 4px;
   }
 
   .reason-by {
