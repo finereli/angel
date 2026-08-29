@@ -17,6 +17,7 @@ interface ActiveStream {
   tools: Array<{ id: string; name: string; label: string; result?: string }>
   parts: StreamPart[] // ordered text/tool parts, as the reply is rendered
   aborted: boolean
+  savedMsgId: number | null // D1 row id once the in-progress message has been persisted
 }
 
 interface WsAttachment {
@@ -229,7 +230,7 @@ export class AngelDO implements DurableObject {
 
   private async streamResponse(conversationId: string, agentId: string, agentName: string, content: string): Promise<string> {
     const stream: ActiveStream = {
-      conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, tools: [], parts: [], aborted: false,
+      conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, tools: [], parts: [], aborted: false, savedMsgId: null,
     }
     this.activeStreams.set(conversationId, stream)
     let sawDone = false
@@ -249,9 +250,13 @@ export class AngelDO implements DurableObject {
             break
           }
           case 'commit':
-            // Prior rounds' text and parts are now final; a later reset can't roll past them.
             stream.commitLen = stream.text.length
             stream.commitPartLen = stream.parts.length
+            if (stream.text.trim()) {
+              stream.savedMsgId = await this.saveAssistant(
+                conversationId, stream.text, stream.parts, undefined, stream.savedMsgId,
+              )
+            }
             break
           case 'reset':
             // Discard the truncated attempt's text AND any tools it announced,
@@ -274,16 +279,17 @@ export class AngelDO implements DurableObject {
             const p = stream.parts.find(x => x.type === 'tool' && x.id === event.id)
             if (p && p.type === 'tool') { p.result = event.result; p.label = event.label }
             this.broadcast({ type: 'tool_result', conversationId, seq: stream.seq, id: event.id, result: event.result, label: event.label })
+            if (stream.savedMsgId) {
+              await this.saveAssistant(conversationId, stream.text, stream.parts, undefined, stream.savedMsgId)
+            }
             break
           }
           case 'done':
             sawDone = true
-            // Drop any tool announced but never executed (a truncated tail) so a
-            // phantom spinner can't be saved into the message.
-            await this.saveAssistant(
+            stream.savedMsgId = await this.saveAssistant(
               conversationId, stream.text || '*(no response)*',
               stream.parts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined)),
-              event.usage,
+              event.usage, stream.savedMsgId,
             )
             this.broadcast({ type: 'done', conversationId, seq: stream.seq, usage: event.usage })
             break
@@ -297,7 +303,7 @@ export class AngelDO implements DurableObject {
       // Only if we didn't already save on `done` - avoids a double message.
       if (stream.aborted && !sawDone && stream.text.trim()) {
         stream.parts.push({ type: 'text', content: '\n\n*(stopped)*' })
-        await this.saveAssistant(conversationId, stream.text + '\n\n*(stopped)*', stream.parts)
+        await this.saveAssistant(conversationId, stream.text + '\n\n*(stopped)*', stream.parts, undefined, stream.savedMsgId)
         stream.seq++
         this.broadcast({ type: 'done', conversationId, seq: stream.seq })
       }
@@ -309,7 +315,7 @@ export class AngelDO implements DurableObject {
       const hadText = stream.text.trim().length > 0
       if (hadText) stream.parts.push({ type: 'text', content: `\n\n*(error: ${errMsg})*` })
       const finalContent = hadText ? `${stream.text}\n\n*(error: ${errMsg})*` : `*Error: ${errMsg}*`
-      await this.saveAssistant(conversationId, finalContent, hadText ? stream.parts : undefined).catch(() => {})
+      await this.saveAssistant(conversationId, finalContent, hadText ? stream.parts : undefined, undefined, stream.savedMsgId).catch(() => {})
     } finally {
       this.activeStreams.delete(conversationId)
     }
@@ -319,19 +325,27 @@ export class AngelDO implements DurableObject {
 
   private async saveAssistant(
     conversationId: string, content: string,
-    parts?: StreamPart[], usage?: { input: number; output: number }
-  ): Promise<void> {
-    await this.env.DB.prepare(
-      `INSERT INTO messages (conversation_id, role, content, parts, usage_input, usage_output)
-       VALUES (?, 'assistant', ?, ?, ?, ?)`
-    ).bind(
-      conversationId, content,
-      parts && parts.length ? JSON.stringify(parts) : null,
-      usage?.input ?? null, usage?.output ?? null,
-    ).run()
+    parts?: StreamPart[], usage?: { input: number; output: number },
+    existingMsgId?: number | null,
+  ): Promise<number> {
+    const partsJson = parts && parts.length ? JSON.stringify(parts) : null
+    let msgId: number
+    if (existingMsgId) {
+      await this.env.DB.prepare(
+        `UPDATE messages SET content = ?, parts = ?, usage_input = ?, usage_output = ? WHERE id = ?`
+      ).bind(content, partsJson, usage?.input ?? null, usage?.output ?? null, existingMsgId).run()
+      msgId = existingMsgId
+    } else {
+      const result = await this.env.DB.prepare(
+        `INSERT INTO messages (conversation_id, role, content, parts, usage_input, usage_output)
+         VALUES (?, 'assistant', ?, ?, ?, ?)`
+      ).bind(conversationId, content, partsJson, usage?.input ?? null, usage?.output ?? null).run()
+      msgId = result.meta.last_row_id
+    }
     await this.env.DB.prepare(
       `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
     ).bind(conversationId).run()
+    return msgId
   }
 
   private handleStop(conversationId: string) {
