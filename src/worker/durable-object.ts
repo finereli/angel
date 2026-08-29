@@ -128,8 +128,6 @@ export class AngelDO implements DurableObject {
         }
         return Response.json({ ok: true, removed: !!result.meta.changes })
       }
-    }
-
       if (url.pathname === '/api/sync-alarm') {
         await this.syncAlarm()
         return Response.json({ ok: true })
