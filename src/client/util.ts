@@ -1,4 +1,5 @@
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const renderer = new marked.Renderer()
 renderer.link = ({ href, title, text }) => {
@@ -7,9 +8,18 @@ renderer.link = ({ href, title, text }) => {
 }
 marked.setOptions({ breaks: true, gfm: true, renderer })
 
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A') {
+    node.setAttribute('target', '_blank')
+    node.setAttribute('rel', 'noopener noreferrer')
+  }
+})
+
 export function renderMarkdown(content: string): string {
-  try { return marked.parse(content, { async: false }) as string }
-  catch { return content }
+  try {
+    const html = marked.parse(content, { async: false }) as string
+    return DOMPurify.sanitize(html)
+  } catch { return content }
 }
 
 function utc(ts: string): Date {

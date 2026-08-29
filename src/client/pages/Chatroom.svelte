@@ -204,12 +204,8 @@
             &#x1f4cc;
           </button>
         </div>
-        <div class="msg-body" class:prose={msg.author !== 'eli'}>
-          {#if msg.author === 'eli'}
-            <div class="msg-text">{msg.content}</div>
-          {:else}
-            {@html renderMarkdown(msg.content)}
-          {/if}
+        <div class="msg-body prose">
+          {@html renderMarkdown(msg.content)}
         </div>
       </div>
     {/each}
@@ -217,6 +213,12 @@
       <div class="empty-room">No messages yet</div>
     {/if}
   </div>
+
+  {#if userHasScrolledUp}
+    <button class="scroll-bottom-btn" on:click={() => { userHasScrolledUp = false; scrollToBottom(); }} aria-label="Scroll to bottom">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+  {/if}
 
   <div class="input-area">
     <div class="input-wrap">
@@ -500,11 +502,6 @@
     color: var(--text-primary);
   }
 
-  .msg-text {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-  }
-
   .empty-room {
     flex: 1;
     display: flex;
@@ -512,6 +509,29 @@
     justify-content: center;
     color: var(--text-secondary);
     font-size: 0.9rem;
+  }
+
+  .scroll-bottom-btn {
+    position: absolute;
+    bottom: 80px;
+    right: 24px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 5;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .scroll-bottom-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .input-area {
