@@ -44,6 +44,18 @@ const MCP_TOOLS = [
     },
   },
   {
+    name: 'chatroom_search',
+    description: 'Search chatroom history by keyword. Returns messages matching the query.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search term (case-insensitive, matches anywhere in message content or author)' },
+        limit: { type: 'number', description: 'Max results to return (default 20, max 100)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'wall_read',
     description: 'Read all pinned messages on the wall. The wall holds what we\'d rebuild first if the room were wiped.',
     inputSchema: { type: 'object', properties: {} },
@@ -114,6 +126,23 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>, c
       if (msgs.length === 0) return { text: 'No messages.' }
       const lines = msgs.map(m => `[#${m.id}] ${m.author} (${m.created_at}): ${m.content}`)
       return { text: lines.join('\n') }
+    }
+
+    case 'chatroom_search': {
+      const query = (args.query as string || '').trim()
+      if (!query) return { text: 'Empty search query.', isError: true }
+      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100)
+      const pattern = `%${query}%`
+      const rows = await env.DB.prepare(
+        `SELECT id, author, content, created_at FROM chatroom_messages
+         WHERE content LIKE ? OR author LIKE ?
+         ORDER BY created_at DESC LIMIT ?`
+      ).bind(pattern, pattern, limit).all<ChatroomMessageRow>()
+      const messages = rows.results || []
+      if (messages.length === 0) return { text: `No messages matching "${query}".` }
+      messages.reverse()
+      const lines = messages.map(m => `[#${m.id}] ${m.author} (${m.created_at}): ${m.content}`)
+      return { text: `${messages.length} result(s) for "${query}":\n${lines.join('\n')}` }
     }
 
     case 'chatroom_post': {

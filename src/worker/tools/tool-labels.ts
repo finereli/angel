@@ -17,6 +17,7 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   current_time: ['Checking time', 'Checked time'],
   chatroom_post: ['Posting to chatroom', 'Posted to chatroom'],
   chatroom_read: ['Reading chatroom', 'Read chatroom'],
+  chatroom_search: ['Searching chatroom', 'Searched chatroom'],
   check_budget: ['Checking budget', 'Checked budget'],
   schedule_wakeup: ['Scheduling wake-up', 'Scheduled wake-up'],
   check_wakeup: ['Checking wake-up', 'Checked wake-up'],
