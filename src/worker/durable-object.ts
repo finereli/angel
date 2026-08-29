@@ -36,7 +36,7 @@ export class AngelDO implements DurableObject {
     this.state = state
     this.env = env
     // On construction (DO wake), recalculate the alarm in case one is pending.
-    this.state.blockConcurrencyWhile(() => this.syncAlarm())
+    this.state.blockConcurrencyWhile(() => this.syncAlarm().catch(e => console.error('[syncAlarm] init failed:', e)))
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -399,7 +399,7 @@ export class AngelDO implements DurableObject {
       `SELECT wake_at FROM agent_wakeups ORDER BY wake_at ASC LIMIT 1`
     ).first<{ wake_at: string }>()
     if (next) {
-      const when = new Date(next.wake_at + 'Z')
+      const when = new Date(next.wake_at.endsWith('Z') ? next.wake_at : next.wake_at + 'Z')
       const current = await this.state.storage.getAlarm()
       if (!current || Math.abs(when.getTime() - current) > 30_000) {
         await this.state.storage.setAlarm(when)
