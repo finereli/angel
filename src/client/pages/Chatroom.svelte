@@ -144,28 +144,25 @@
           <div class="wall-pin">
             <div class="pin-meta">
               <span class="pin-icon">&#x1f4cc;</span>
-              <span class="pinned-by">pinned by {authorLabel(pin.pinned_by)}</span>
-              {#if pin.reason}
-                <span class="pin-reason">&mdash; {pin.reason}</span>
-              {/if}
+              pinned by <strong>{authorLabel(pin.pinned_by)}</strong>{#if pin.reason} &mdash; <em>{pin.reason}</em>{/if}
             </div>
-            <div class="room-msg pinned-msg">
+            <div class="pinned-msg-body">
               <div class="msg-header">
                 <span class="author-tag" style="--author-color: {authorColor(pin.author)}">
                   {authorLabel(pin.author)}
                 </span>
                 <span class="msg-time">{timeLabel(pin.message_created_at)}</span>
+                <div class="pin-actions">
+                  <button class="action-btn jump-btn" on:click={() => scrollToMessage(pin.message_id)} title="Jump to message">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                  <button class="action-btn unpin-btn" on:click={() => angel.unpinFromWall(pin.message_id)} title="Unpin">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
               </div>
-              <div class="msg-body prose">
+              <div class="msg-body prose pinned-content">
                 {@html renderMarkdown(pin.content)}
-              </div>
-              <div class="pin-actions">
-                <button class="action-btn jump-btn" on:click={() => scrollToMessage(pin.message_id)} title="Jump to message">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
-                </button>
-                <button class="action-btn unpin-btn" on:click={() => angel.unpinFromWall(pin.message_id)} title="Unpin">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
               </div>
             </div>
           </div>
@@ -309,36 +306,53 @@
   }
 
   .pin-meta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
+    padding: 5px 12px;
     background: var(--bg-hover);
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--text-secondary);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .pin-icon {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
+    margin-right: 4px;
   }
-  .pinned-by {
-    font-weight: 500;
+  .pin-meta strong {
+    font-weight: 600;
+    color: var(--text-primary);
   }
-  .pin-reason {
+  .pin-meta em {
     font-style: italic;
   }
 
-  .pinned-msg {
-    border-left: none;
+  .pinned-msg-body {
+    padding: 8px 12px;
   }
-  .pinned-msg:hover {
-    background: transparent;
+
+  .pinned-content {
+    max-height: 4.5em;
+    overflow: hidden;
+    position: relative;
+    font-size: 0.88rem;
+  }
+  .pinned-content::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1.5em;
+    background: linear-gradient(transparent, var(--bg-surface));
+    pointer-events: none;
   }
 
   .pin-actions {
     display: flex;
-    gap: 4px;
-    justify-content: flex-end;
-    margin-top: 4px;
+    gap: 2px;
+    margin-left: auto;
+    flex-shrink: 0;
   }
   .action-btn {
     border: none;
@@ -347,7 +361,7 @@
     cursor: pointer;
     padding: 4px;
     border-radius: 4px;
-    opacity: 0.5;
+    opacity: 0.4;
     transition: opacity 0.15s;
   }
   .action-btn:hover {
