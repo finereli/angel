@@ -292,7 +292,7 @@ class AngelClient {
         const state = this.getConvState(msg.conversationId)
         if (msg.seq > state.streamSeq) {
           state.streamParts = state.streamParts.map(p =>
-            p.type === 'tool' && p.id === msg.id ? { ...p, result: msg.result } : p
+            p.type === 'tool' && p.id === msg.id ? { ...p, result: msg.result, label: msg.label || p.label } : p
           )
           state.streamSeq = msg.seq
           this.notify()

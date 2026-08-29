@@ -2,7 +2,6 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { angel } from '../streamManager';
   import type { ConversationState } from '../streamManager';
-  import { TOOL_LABELS } from '../../worker/tools/registry';
   import { renderMarkdown, dayKey, dateLabel } from '../util';
 
   export let conversationId: string;
@@ -296,12 +295,8 @@
     textareaEl.style.overflowY = textareaEl.scrollHeight > 168 ? 'auto' : 'hidden';
   }
 
-  // [in-progress, done] label per tool - kind only, no description.
-  function toolProgress(name: string): string {
-    return TOOL_LABELS[name]?.[0] || 'Working';
-  }
-  function toolDone(name: string, fallback?: string): string {
-    return TOOL_LABELS[name]?.[1] || fallback || name;
+  function toolLabel(label: string, name: string): string {
+    return label || name;
   }
 
   function relativeTime(ts: string): string {
@@ -369,7 +364,7 @@
                   {:else}
                     <div class="tool-row done" title={part.name}>
                       <svg class="tool-check" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
-                      {toolDone(part.name, part.label)}
+                      {toolLabel(part.label, part.name)}
                     </div>
                   {/if}
                 {/each}
@@ -381,7 +376,7 @@
                     {#each tools as tool}
                       <span class="tool-row done" title={tool.name}>
                         <svg class="tool-check" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
-                        {toolDone(tool.name, tool.label)}
+                        {toolLabel(tool.label, tool.name)}
                       </span>
                     {/each}
                   </div>
@@ -406,7 +401,7 @@
                   {:else}
                     <span class="tool-spinner"></span>
                   {/if}
-                  {part.result ? toolDone(part.name, part.label) : toolProgress(part.name) + '…'}
+                  {toolLabel(part.label, part.name)}{part.result ? '' : '…'}
                 </div>
               {/if}
             {/each}

@@ -45,5 +45,4 @@ export async function executeTool(
   return tool.run(ctx, args)
 }
 
-export const TOOL_LABELS: Record<string, [string, string]> =
-  Object.fromEntries(ALL_TOOLS.map(t => [t.def.function.name, t.label]))
+export { TOOL_LABELS } from './tool-labels'

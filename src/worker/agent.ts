@@ -1,6 +1,6 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
 import { chatCompletionStream } from './llm'
-import { getToolDefinitions, executeTool, type ToolContext } from './tools/registry'
+import { getToolDefinitions, executeTool, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble } from './lists'
 import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
@@ -118,7 +118,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
               const call = toolCalls[tc.index]
               if (call && call.id && call.function.name && !announced.has(call.id)) {
                 announced.add(call.id)
-                yield { type: 'tool_start', id: call.id, name: call.function.name, label: '' }
+                yield { type: 'tool_start', id: call.id, name: call.function.name, label: TOOL_LABELS[call.function.name]?.[0] || call.function.name }
               }
             }
           }
@@ -167,7 +167,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
       let result: string
       try { result = await executeTool(toolCtx, tc.function.name, args) }
       catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
-      yield { type: 'tool_result', id: tc.id, result }
+      yield { type: 'tool_result', id: tc.id, result, label: TOOL_LABELS[tc.function.name]?.[1] || tc.function.name }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
   }

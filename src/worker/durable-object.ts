@@ -270,10 +270,10 @@ export class AngelDO implements DurableObject {
             break
           case 'tool_result': {
             const tool = stream.tools.find(t => t.id === event.id)
-            if (tool) tool.result = event.result
+            if (tool) { tool.result = event.result; tool.label = event.label }
             const p = stream.parts.find(x => x.type === 'tool' && x.id === event.id)
-            if (p && p.type === 'tool') p.result = event.result
-            this.broadcast({ type: 'tool_result', conversationId, seq: stream.seq, id: event.id, result: event.result })
+            if (p && p.type === 'tool') { p.result = event.result; p.label = event.label }
+            this.broadcast({ type: 'tool_result', conversationId, seq: stream.seq, id: event.id, result: event.result, label: event.label })
             break
           }
           case 'done':
