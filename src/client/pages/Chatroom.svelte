@@ -6,8 +6,29 @@
 
   export let showWall = false;
 
+  interface GroupedPin {
+    message_id: number;
+    author: string;
+    content: string;
+    message_created_at: string;
+    reasons: { pinned_by: string; reason: string }[];
+  }
+
   let messages: ChatroomMessageRow[] = [];
   let wallPins: WallPinRow[] = [];
+
+  $: groupedPins = (() => {
+    const map = new Map<number, GroupedPin>();
+    for (const p of wallPins) {
+      let g = map.get(p.message_id);
+      if (!g) {
+        g = { message_id: p.message_id, author: p.author, content: p.content, message_created_at: p.message_created_at, reasons: [] };
+        map.set(p.message_id, g);
+      }
+      g.reasons.push({ pinned_by: p.pinned_by, reason: p.reason });
+    }
+    return [...map.values()];
+  })();
   let messageText = '';
   let messagesEl: HTMLDivElement;
   let textareaEl: HTMLTextAreaElement;
@@ -137,12 +158,17 @@
     <div class="wall-drawer">
       <div class="drawer-header">
         <span class="drawer-title">Wall</span>
-        <span class="drawer-count">{wallPins.length} pin{wallPins.length !== 1 ? 's' : ''}</span>
+        <span class="drawer-count">{groupedPins.length} pin{groupedPins.length !== 1 ? 's' : ''}</span>
       </div>
       <div class="drawer-body">
-        {#each wallPins as pin (pin.id)}
+        {#each groupedPins as pin (pin.message_id)}
           <div class="wall-pin">
-            <div class="pin-reason">{pin.reason || pin.content.slice(0, 120)}</div>
+            {#each pin.reasons as r}
+              <div class="pin-reason">
+                <span class="reason-by" style="--author-color: {authorColor(r.pinned_by)}">{authorLabel(r.pinned_by)}</span>
+                <span class="reason-text">{r.reason || pin.content.slice(0, 120)}</span>
+              </div>
+            {/each}
             <div class="pin-foot">
               <button class="pin-source" on:click={() => scrollToMessage(pin.message_id)} title="Jump to message">
                 <span class="source-author" style="--author-color: {authorColor(pin.author)}">{authorLabel(pin.author)}</span>
@@ -150,14 +176,13 @@
                 <span class="source-time">{timeLabel(pin.message_created_at)}</span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
-              <span class="pin-by">pinned by {authorLabel(pin.pinned_by)}</span>
               <button class="action-btn unpin-btn" on:click={() => angel.unpinFromWall(pin.message_id)} title="Unpin">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
           </div>
         {/each}
-        {#if wallPins.length === 0}
+        {#if groupedPins.length === 0}
           <div class="empty-wall">The wall is empty</div>
         {/if}
       </div>
@@ -299,10 +324,29 @@
   }
 
   .pin-reason {
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     line-height: 1.45;
     color: var(--text-primary);
-    margin-bottom: 6px;
+    padding: 2px 0;
+  }
+  .pin-reason + .pin-reason {
+    border-top: 1px solid var(--border);
+    margin-top: 2px;
+    padding-top: 4px;
+  }
+
+  .reason-by {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--author-color, var(--text-secondary));
+    margin-right: 6px;
+  }
+  .reason-by::after {
+    content: ':';
+  }
+
+  .reason-text {
+    color: var(--text-primary);
   }
 
   .pin-foot {
@@ -341,11 +385,6 @@
     font-weight: 500;
   }
 
-  .pin-by {
-    margin-left: auto;
-    opacity: 0.6;
-  }
-
   .action-btn {
     border: none;
     background: none;
@@ -353,6 +392,7 @@
     cursor: pointer;
     padding: 2px;
     border-radius: 4px;
+    margin-left: auto;
     opacity: 0;
     transition: opacity 0.15s;
   }

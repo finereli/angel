@@ -7,7 +7,7 @@ export const wallTools: Tool[] = [
       type: 'function',
       function: {
         name: 'wall_pin',
-        description: 'Pin a chatroom message to the wall. The wall holds what we\'d rebuild first if the room were wiped.',
+        description: 'Pin a chatroom message to the wall with your reason. Multiple people can pin the same message with different reasons.',
         parameters: {
           type: 'object',
           properties: {
@@ -32,7 +32,7 @@ export const wallTools: Tool[] = [
         ).bind(messageId, ctx.agentId, reason).run()
       } catch (e: unknown) {
         if (e instanceof Error && e.message.includes('UNIQUE'))
-          return `Message ${messageId} is already on the wall.`
+          return `You already pinned message ${messageId}. Unpin first to change your reason.`
         throw e
       }
       return `Pinned message ${messageId} to the wall.`
@@ -43,7 +43,7 @@ export const wallTools: Tool[] = [
       type: 'function',
       function: {
         name: 'wall_unpin',
-        description: 'Remove a message from the wall.',
+        description: 'Remove your pin from a message. Other people\'s pins on the same message are kept.',
         parameters: {
           type: 'object',
           properties: {
@@ -57,9 +57,9 @@ export const wallTools: Tool[] = [
     run: async (ctx, args) => {
       const messageId = args.message_id as number
       const result = await ctx.env.DB.prepare(
-        `DELETE FROM wall_pins WHERE message_id = ?`
-      ).bind(messageId).run()
-      return result.meta.changes ? `Unpinned message ${messageId}.` : `Message ${messageId} is not on the wall.`
+        `DELETE FROM wall_pins WHERE message_id = ? AND pinned_by = ?`
+      ).bind(messageId, ctx.agentId).run()
+      return result.meta.changes ? `Unpinned message ${messageId}.` : `You don't have a pin on message ${messageId}.`
     },
   },
   {
@@ -82,11 +82,20 @@ export const wallTools: Tool[] = [
       ).all<WallPinRow>()
       const pins = rows.results || []
       if (pins.length === 0) return 'The wall is empty.'
-      const lines = pins.map(p => {
-        const reason = p.reason ? ` — "${p.reason}"` : ''
-        return `[#${p.message_id}] ${p.author}: ${p.content}\n  pinned by ${p.pinned_by}${reason} (${p.created_at})`
+      const grouped = new Map<number, { author: string; content: string; message_created_at: string; reasons: { by: string; reason: string }[] }>()
+      for (const p of pins) {
+        let g = grouped.get(p.message_id)
+        if (!g) {
+          g = { author: p.author, content: p.content, message_created_at: p.message_created_at, reasons: [] }
+          grouped.set(p.message_id, g)
+        }
+        g.reasons.push({ by: p.pinned_by, reason: p.reason })
+      }
+      const lines = [...grouped.entries()].map(([msgId, g]) => {
+        const reasons = g.reasons.map(r => `  pinned by ${r.by}${r.reason ? ` — "${r.reason}"` : ''}`).join('\n')
+        return `[#${msgId}] ${g.author}: ${g.content}\n${reasons}`
       })
-      return `${pins.length} pin(s) on the wall:\n${lines.join('\n\n')}`
+      return `${grouped.size} pinned message(s) on the wall:\n${lines.join('\n\n')}`
     },
   },
 ]

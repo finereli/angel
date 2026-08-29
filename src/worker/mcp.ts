@@ -140,7 +140,7 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messageId, pinnedBy: 'claude', reason }),
       }))
-      if (res.status === 409) return { text: `Message #${messageId} is already on the wall.` }
+      if (res.status === 409) return { text: `You already pinned message #${messageId}. Unpin first to change your reason.` }
       if (!res.ok) return { text: 'Failed to pin.', isError: true }
       return { text: `Pinned message #${messageId} to the wall.` }
     }
@@ -151,10 +151,10 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>): 
       const res = await stub.fetch(new Request('http://do/api/wall/unpin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messageId }),
+        body: JSON.stringify({ messageId, pinnedBy: 'claude' }),
       }))
       const data = await res.json() as { removed: boolean }
-      return { text: data.removed ? `Unpinned message #${messageId}.` : `Message #${messageId} is not on the wall.` }
+      return { text: data.removed ? `Unpinned message #${messageId}.` : `You don't have a pin on message #${messageId}.` }
     }
 
     default:

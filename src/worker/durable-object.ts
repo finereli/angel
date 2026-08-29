@@ -103,17 +103,29 @@ export class AngelDO implements DurableObject {
           `SELECT w.id, w.message_id, w.pinned_by, w.reason, w.created_at,
                   m.author, m.content, m.created_at AS message_created_at
            FROM wall_pins w JOIN chatroom_messages m ON m.id = w.message_id
-           WHERE w.message_id = ?`
-        ).bind(messageId).first<WallPinRow>()
+           WHERE w.id = (SELECT MAX(id) FROM wall_pins WHERE message_id = ? AND pinned_by = ?)`
+        ).bind(messageId, pinnedBy).first<WallPinRow>()
         if (row) this.broadcast({ type: 'wall:pinned', pin: row })
         return Response.json({ ok: true, pin: row })
       }
       if (url.pathname === '/api/wall/unpin') {
-        const { messageId } = await request.json() as { messageId: number }
-        const result = await this.env.DB.prepare(
-          `DELETE FROM wall_pins WHERE message_id = ?`
-        ).bind(messageId).run()
-        if (result.meta.changes) this.broadcast({ type: 'wall:unpinned', messageId })
+        const { messageId, pinnedBy } = await request.json() as { messageId: number; pinnedBy?: string }
+        const result = pinnedBy
+          ? await this.env.DB.prepare(
+              `DELETE FROM wall_pins WHERE message_id = ? AND pinned_by = ?`
+            ).bind(messageId, pinnedBy).run()
+          : await this.env.DB.prepare(
+              `DELETE FROM wall_pins WHERE message_id = ?`
+            ).bind(messageId).run()
+        const remaining = await this.env.DB.prepare(
+          `SELECT COUNT(*) as cnt FROM wall_pins WHERE message_id = ?`
+        ).bind(messageId).first<{ cnt: number }>()
+        if (result.meta.changes && (!remaining || remaining.cnt === 0)) {
+          this.broadcast({ type: 'wall:unpinned', messageId })
+        } else if (result.meta.changes) {
+          const rows = await this.env.DB.prepare(AngelDO.WALL_QUERY).all<WallPinRow>()
+          this.broadcast({ type: 'wall:pins', pins: rows.results || [] })
+        }
         return Response.json({ ok: true, removed: !!result.meta.changes })
       }
     }
@@ -512,20 +524,19 @@ export class AngelDO implements DurableObject {
       if (e instanceof Error && e.message.includes('UNIQUE')) return
       throw e
     }
-    const row = await this.env.DB.prepare(
-      `SELECT w.id, w.message_id, w.pinned_by, w.reason, w.created_at,
-              m.author, m.content, m.created_at AS message_created_at
-       FROM wall_pins w JOIN chatroom_messages m ON m.id = w.message_id
-       WHERE w.message_id = ?`
-    ).bind(messageId).first<WallPinRow>()
-    if (row) this.broadcast({ type: 'wall:pinned', pin: row })
+    await this.broadcastWallState()
   }
 
   private async handleWallUnpin(messageId: number) {
     await this.env.DB.prepare(
-      `DELETE FROM wall_pins WHERE message_id = ?`
+      `DELETE FROM wall_pins WHERE message_id = ? AND pinned_by = 'eli'`
     ).bind(messageId).run()
-    this.broadcast({ type: 'wall:unpinned', messageId })
+    await this.broadcastWallState()
+  }
+
+  private async broadcastWallState() {
+    const rows = await this.env.DB.prepare(AngelDO.WALL_QUERY).all<WallPinRow>()
+    this.broadcast({ type: 'wall:pins', pins: rows.results || [] })
   }
 
   // --- Restart recovery ---
