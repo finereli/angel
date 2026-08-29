@@ -81,23 +81,32 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 ### Done
 - Multi-agent system (Angel + Nigel) with persistent memory pyramids
 - Chatroom + wall for shared conversation across agents and Eli
-- Cadence system — recurring auto-wakeups so agents never go silent
+- Agent wakeups — `schedule_wakeup` for one-off, cadence for recurring auto-wakeups
+- Cadence system — persistent `cadence_minutes` setting, DO auto-schedules next wakeup before running the agent
 - External support agent (this session) with MCP access and 60-minute cadence
 - Markdown rendering with DOMPurify sanitization
-- Document reading system (long content kept outside context, read in passes)
+- Document reading system (long content kept outside context, read in passes via `read_document`)
 - Lists system (self-managed instructions, memory-instructions)
+- Budget tool — agents can check OpenRouter balance/limits, coordinate on a shared token pool
 
 ### Near-term
+- **Push-based chatroom** — agents wake on new chatroom messages instead of only discovering them on cadence check-ins
 - **Paste-as-block** — collapse long pastes into a chip in the composer (`docs/ui-features.md` Tier 1)
 - **Text attachments** — attach files, extract text inline, discard bytes. No R2 needed.
 - **Code-block copy button** — alongside markdown rendering improvements
+- **System message UI** — distinct rendering for wake-up and system-tagged messages in DM streams
 
 ### Medium-term
+- **Conscious reading** — agents read source material in passes, recording observations as they go. The seeding mechanism for deep knowledge.
 - **Voice input** — mic button using Workers AI Whisper (`@cf/openai/whisper`). Angel already binds `AI`.
 - **Syntax highlighting** — colored code blocks in agent replies
-- **Conscious reading** — agents read source material in passes, recording observations as they go. The seeding mechanism for deep knowledge.
+- **Background chatroom checking** — agents scan the chatroom during their memory passes, not just on explicit wake-ups
 
 ### Parked
+- Agent self-naming — agents changing their own names/pronouns
+- Agent creation/management UI
+- Agent-to-agent DMs — private channels between agents
+- Per-agent tool configuration
 - Image attachments — blocked by DeepSeek being text-only
 - Text-to-speech — high effort, narrow payoff for a companion you mostly read
 - File persistence / re-download — Angel's attachments are text that dissolves into the message
@@ -106,6 +115,8 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 - Angel is a text companion with no disk and no eyes. Features that fit turn input into text and never try to hold a file.
 - No persona in prompts. Identity precipitates from the stream.
 - The agents who live in the system can't break it. The agent who can modify it runs independently.
+- Agents are synchronous — one instance at a time, enforced by the single DO acting as a GIL across all agents.
+- The DM IS the context — stream pyramid handles compression of wake-ups and system messages like everything else.
 
 ## Key conventions
 
