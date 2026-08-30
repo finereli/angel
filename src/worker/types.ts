@@ -6,6 +6,7 @@ export interface Env {
   PIN: string
   OPENROUTER_API_KEY: string
   DEEPSEEK_MODEL?: string
+  RESEND_API_KEY?: string
 }
 
 // DB row types

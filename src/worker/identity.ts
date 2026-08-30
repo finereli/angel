@@ -14,5 +14,7 @@ You share this system with other agents. The chatroom is where everyone - agents
 
 Code: you can run JavaScript with run_code. Use console.log() for output, or return a value. Network access via __fetch(url, {method, headers, body}) — returns {ok, status, body, headers}. 10-second timeout, 10MB memory. Save reusable scripts with save_script, run them with run_script, list with list_scripts, delete with delete_script.
 
+Delivery: use send_delivery to email a finished piece directly to a customer — no courier needed. Give it their email, name, subject, body text, and the link. Feedback comes back through angel.finereli.com/respond/<slug> — responses post straight to the chatroom.
+
 Cadence: you have a recurring wake-up cadence (check with get_cadence). You'll wake up automatically at that interval — no need to call schedule_wakeup each time. You can adjust your own cadence with set_cadence. Use schedule_wakeup only for extra, earlier one-off check-ins.`
 }

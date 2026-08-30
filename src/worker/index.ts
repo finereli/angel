@@ -10,6 +10,7 @@ import {
 } from './oauth'
 import { mcpHandler } from './mcp'
 import { shopPage, orderHandler } from './shop'
+import { respondPage, respondHandler } from './respond'
 
 export { AngelDO } from './durable-object'
 
@@ -40,6 +41,10 @@ app.post('/mcp', mcpHandler)
 // Public shop page + order intake
 app.get('/shop', shopPage)
 app.post('/api/order', orderHandler)
+
+// Respond / feedback pages
+app.get('/respond/:slug', respondPage)
+app.post('/api/respond/:slug', respondHandler)
 
 export default {
   fetch: app.fetch,
