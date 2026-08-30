@@ -6,8 +6,8 @@ const STALL_MS = 30_000     // abort if no data for this long
 const OVERALL_MS = 180_000  // abort if the whole call runs past this
 const NONSTREAM_MS = 120_000
 
-export function getModel(env: Env): string {
-  return env.DEEPSEEK_MODEL || 'deepseek/deepseek-v4-flash-0731'
+export function getModel(env: Env, agentModel?: string | null): string {
+  return agentModel || env.DEEPSEEK_MODEL || 'deepseek/deepseek-v4-flash-0731'
 }
 
 const headers = (env: Env) => ({
@@ -20,10 +20,10 @@ const headers = (env: Env) => ({
 export async function chatCompletion(
   env: Env,
   messages: ChatMessage[],
-  opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number } = {}
+  opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string } = {}
 ): Promise<{ content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; usage?: { prompt_tokens: number; completion_tokens: number } }> {
   const body: Record<string, unknown> = {
-    model: getModel(env),
+    model: opts.model || getModel(env),
     messages,
     temperature: opts.temperature ?? 0.7,
     max_tokens: opts.max_tokens ?? 4096,
@@ -51,10 +51,10 @@ export async function chatCompletion(
 export async function* chatCompletionStream(
   env: Env,
   messages: ChatMessage[],
-  opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number } = {}
+  opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string } = {}
 ): AsyncGenerator<StreamChunk> {
   const body: Record<string, unknown> = {
-    model: getModel(env),
+    model: opts.model || getModel(env),
     messages,
     temperature: opts.temperature ?? 0.7,
     // Reasoning models spend thinking tokens against this cap; 4096 was getting

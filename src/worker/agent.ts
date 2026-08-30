@@ -11,8 +11,8 @@ const MAX_TOOL_ROUNDS = 12
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
-function isDeepSeek(env: Env): boolean {
-  return getModel(env).toLowerCase().includes('deepseek')
+function isDeepSeek(env: Env, agentModel?: string | null): boolean {
+  return getModel(env, agentModel).toLowerCase().includes('deepseek')
 }
 
 interface AgentContext {
@@ -20,6 +20,7 @@ interface AgentContext {
   conversationId: string
   agentId: string
   agentName: string
+  agentModel?: string | null
 }
 
 async function buildSystemPrompt(env: Env, agentId: string, agentName: string): Promise<string> {
@@ -59,7 +60,8 @@ function verbatimTurns(pairs: Pair[]): ChatMessage[] {
 
 // ---- Response pass (hot path, streaming) ----
 export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGenerator<AgentEvent> {
-  const { env, conversationId, agentId, agentName } = ctx
+  const { env, conversationId, agentId, agentName, agentModel } = ctx
+  const modelId = getModel(env, agentModel)
 
   const system = await buildSystemPrompt(env, agentId, agentName)
   const { tiles, verbatim, total } = await renderStreamContext(env, agentId, conversationId)
@@ -88,7 +90,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     let truncated = false
     let finishReason: string | null = null
     const announced = new Set<string>() // tool ids already shown to the client
-    const dsmlFilter = isDeepSeek(env) ? new DsmlStreamFilter() : null
+    const dsmlFilter = isDeepSeek(env, agentModel) ? new DsmlStreamFilter() : null
 
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
     // telling the client to discard the truncated partial first. The provider's
@@ -107,7 +109,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         await sleep(Math.min(600 * 2 ** (attempt - 1), 5000)) // 0.6s, 1.2s, 2.4s, 4.8s, 5s
       }
       try {
-        for await (const chunk of chatCompletionStream(env, messages, { tools })) {
+        for await (const chunk of chatCompletionStream(env, messages, { tools, model: modelId })) {
           const choice = chunk.choices[0]
           if (!choice) continue
           if (choice.finish_reason) finishReason = choice.finish_reason
@@ -218,7 +220,10 @@ function isParseableArgs(s: string): boolean {
   try { JSON.parse(t); return true } catch { return false }
 }
 
-export async function runMemoryPass(env: Env, agentId: string, agentName: string, conversationId: string): Promise<void> {
+export async function runMemoryPass(ctx: AgentContext): Promise<void> {
+  const { env, conversationId, agentId, agentName, agentModel } = ctx
+  const modelId = getModel(env, agentModel)
+
   const system = await buildSystemPrompt(env, agentId, agentName)
   const { tiles, verbatim } = await renderStreamContext(env, agentId, conversationId)
   const reminder = await buildPerMessageReminder(env, agentId)
@@ -240,7 +245,7 @@ export async function runMemoryPass(env: Env, agentId: string, agentName: string
     const toolCallArgs = new Map<number, string>()
 
     try {
-      for await (const chunk of chatCompletionStream(env, messages, { tools })) {
+      for await (const chunk of chatCompletionStream(env, messages, { tools, model: modelId })) {
         const choice = chunk.choices[0]
         if (!choice) continue
         if (choice.delta.content) text += choice.delta.content
@@ -254,13 +259,10 @@ export async function runMemoryPass(env: Env, agentId: string, agentName: string
         }
       }
     } catch (e) {
-      // A dropped stream here is best-effort: run any well-formed tool calls we
-      // did get, otherwise give up on this turn's memory pass.
       console.error('[runMemoryPass] stream failed:', e instanceof Error ? e.message : e)
     }
     for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
-    // Recover tool calls from DSML text (DeepSeek only)
-    if (isDeepSeek(env)) {
+    if (isDeepSeek(env, agentModel)) {
       const parsed = parseDsml(text)
       if (parsed) {
         text = parsed.cleanText

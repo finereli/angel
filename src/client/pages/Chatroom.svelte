@@ -417,6 +417,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     overscroll-behavior: contain;
     padding: 16px;
     display: flex;
@@ -446,7 +447,6 @@
     max-width: 100%;
     min-width: 0;
     position: relative;
-    overflow: hidden;
   }
   .room-msg:hover {
     background: var(--bg-hover);

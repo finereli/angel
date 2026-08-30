@@ -242,11 +242,11 @@ export class AngelDO implements DurableObject {
     return rows.results.map(r => ({ id: r.id, name: r.name, conversationId: r.conversation_id }))
   }
 
-  private async resolveAgent(conversationId: string): Promise<{ agentId: string; agentName: string } | null> {
+  private async resolveAgent(conversationId: string): Promise<{ agentId: string; agentName: string; agentModel: string | null } | null> {
     const row = await this.env.DB.prepare(
-      `SELECT a.id, a.name FROM conversations c JOIN agents a ON a.id = c.agent_id WHERE c.id = ?`
-    ).bind(conversationId).first<{ id: string; name: string }>()
-    return row ? { agentId: row.id, agentName: row.name } : null
+      `SELECT a.id, a.name, a.model FROM conversations c JOIN agents a ON a.id = c.agent_id WHERE c.id = ?`
+    ).bind(conversationId).first<{ id: string; name: string; model: string | null }>()
+    return row ? { agentId: row.id, agentName: row.name, agentModel: row.model } : null
   }
 
   private async handleConvLoad(ws: WebSocket, conversationId: string) {
@@ -290,14 +290,14 @@ export class AngelDO implements DurableObject {
       return
     }
 
-    const { agentId, agentName } = agent
-    const respLink = this.responseChain.then(() => this.streamResponse(conversationId, agentId, agentName, content))
+    const { agentId, agentName, agentModel } = agent
+    const respLink = this.responseChain.then(() => this.streamResponse(conversationId, agentId, agentName, agentModel, content))
     this.responseChain = respLink.then(() => {}, () => {})
     let assistantText = ''
     try { assistantText = await respLink }
     catch (e) { console.error('[handleChat] response failed:', e instanceof Error ? e.message : e) }
 
-    const memLink = this.memoryChain.then(() => this.postStreamWork(conversationId, agentId, agentName, content, assistantText))
+    const memLink = this.memoryChain.then(() => this.postStreamWork(conversationId, agentId, agentName, agentModel, content, assistantText))
     this.memoryChain = memLink.then(() => {}, () => {})
     try { await memLink }
     catch (e) { console.error('[handleChat] memory failed:', e instanceof Error ? e.message : e) }
@@ -305,7 +305,7 @@ export class AngelDO implements DurableObject {
     await this.syncAlarm()
   }
 
-  private async streamResponse(conversationId: string, agentId: string, agentName: string, content: string): Promise<string> {
+  private async streamResponse(conversationId: string, agentId: string, agentName: string, agentModel: string | null, content: string): Promise<string> {
     const stream: ActiveStream = {
       conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, savedLen: 0, tools: [], parts: [], aborted: false, savedMsgId: null,
     }
@@ -315,7 +315,7 @@ export class AngelDO implements DurableObject {
     this.log('info', 'stream:start', `agent=${agentName}`, agentId, conversationId)
 
     try {
-      for await (const event of runAgent({ env: this.env, conversationId, agentId, agentName }, content)) {
+      for await (const event of runAgent({ env: this.env, conversationId, agentId, agentName, agentModel }, content)) {
         if (stream.aborted) break
         stream.seq++
         switch (event.type) {
@@ -463,8 +463,8 @@ export class AngelDO implements DurableObject {
     }
   }
 
-  private async postStreamWork(conversationId: string, agentId: string, agentName: string, _userMessage: string, _assistantText: string) {
-    try { await runMemoryPass(this.env, agentId, agentName, conversationId) }
+  private async postStreamWork(conversationId: string, agentId: string, agentName: string, agentModel: string | null, _userMessage: string, _assistantText: string) {
+    try { await runMemoryPass({ env: this.env, conversationId, agentId, agentName, agentModel }) }
     catch (e) { console.error('[postStreamWork:memory-pass]', e instanceof Error ? e.message : e) }
     try { await buildObservationPyramid(this.env, agentId) }
     catch (e) { console.error('[postStreamWork:obs-pyramid]', e instanceof Error ? e.message : e) }
@@ -566,8 +566,8 @@ export class AngelDO implements DurableObject {
     for (const { conversationId, agentId } of interrupted) {
       try {
         const agent = await this.env.DB.prepare(
-          `SELECT name FROM agents WHERE id = ?`
-        ).bind(agentId).first<{ name: string }>()
+          `SELECT name, model FROM agents WHERE id = ?`
+        ).bind(agentId).first<{ name: string; model: string | null }>()
         if (!agent) continue
 
         const sysContent = '<system>You were interrupted mid-response by a restart. Review the conversation and continue where you left off.</system>'
@@ -588,7 +588,7 @@ export class AngelDO implements DurableObject {
         })
 
         const respLink = this.responseChain.then(
-          () => this.streamResponse(conversationId, agentId, agent.name, sysContent)
+          () => this.streamResponse(conversationId, agentId, agent.name, agent.model, sysContent)
         )
         this.responseChain = respLink.then(() => {}, () => {})
         let assistantText = ''
@@ -596,7 +596,7 @@ export class AngelDO implements DurableObject {
         catch (e) { console.error('[resumeInterrupted] response failed:', e instanceof Error ? e.message : e) }
 
         const memLink = this.memoryChain.then(
-          () => this.postStreamWork(conversationId, agentId, agent.name, sysContent, assistantText)
+          () => this.postStreamWork(conversationId, agentId, agent.name, agent.model, sysContent, assistantText)
         )
         this.memoryChain = memLink.then(() => {}, () => {})
         try { await memLink }
@@ -643,13 +643,13 @@ export class AngelDO implements DurableObject {
   async alarm(): Promise<void> {
     const now = new Date().toISOString()
     const due = await this.env.DB.prepare(
-      `SELECT w.agent_id, w.reason, a.name as agent_name, a.cadence_minutes, c.id as conversation_id
+      `SELECT w.agent_id, w.reason, a.name as agent_name, a.model as agent_model, a.cadence_minutes, c.id as conversation_id
        FROM agent_wakeups w
        JOIN agents a ON a.id = w.agent_id
        JOIN conversations c ON c.agent_id = w.agent_id
        WHERE w.wake_at <= ?
        ORDER BY w.wake_at ASC`
-    ).bind(now).all<{ agent_id: string; reason: string | null; agent_name: string; cadence_minutes: number | null; conversation_id: string }>()
+    ).bind(now).all<{ agent_id: string; reason: string | null; agent_name: string; agent_model: string | null; cadence_minutes: number | null; conversation_id: string }>()
 
     for (const row of due.results) {
       await this.env.DB.prepare(
@@ -685,7 +685,7 @@ export class AngelDO implements DurableObject {
       })
 
       const respLink = this.responseChain.then(
-        () => this.streamResponse(row.conversation_id, row.agent_id, row.agent_name, sysContent)
+        () => this.streamResponse(row.conversation_id, row.agent_id, row.agent_name, row.agent_model, sysContent)
       )
       this.responseChain = respLink.then(() => {}, () => {})
       let assistantText = ''
@@ -693,7 +693,7 @@ export class AngelDO implements DurableObject {
       catch (e) { console.error('[alarm] response failed:', e instanceof Error ? e.message : e) }
 
       const memLink = this.memoryChain.then(
-        () => this.postStreamWork(row.conversation_id, row.agent_id, row.agent_name, sysContent, assistantText)
+        () => this.postStreamWork(row.conversation_id, row.agent_id, row.agent_name, row.agent_model, sysContent, assistantText)
       )
       this.memoryChain = memLink.then(() => {}, () => {})
       try { await memLink }
