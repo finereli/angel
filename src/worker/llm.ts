@@ -22,11 +22,13 @@ export async function chatCompletion(
   messages: ChatMessage[],
   opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string } = {}
 ): Promise<{ content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; usage?: { prompt_tokens: number; completion_tokens: number } }> {
+  const model = opts.model || getModel(env)
+  const isReasoning = model.toLowerCase().includes('qwen') || model.toLowerCase().includes('qwq')
   const body: Record<string, unknown> = {
-    model: opts.model || getModel(env),
+    model,
     messages,
     temperature: opts.temperature ?? 0.7,
-    max_tokens: opts.max_tokens ?? 4096,
+    max_tokens: opts.max_tokens ?? (isReasoning ? 16384 : 4096),
   }
   if (opts.tools?.length) { body.tools = opts.tools; body.tool_choice = 'auto' }
 
@@ -53,13 +55,16 @@ export async function* chatCompletionStream(
   messages: ChatMessage[],
   opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string } = {}
 ): AsyncGenerator<StreamChunk> {
+  const model = opts.model || getModel(env)
+  const isReasoning = model.toLowerCase().includes('qwen') || model.toLowerCase().includes('qwq')
   const body: Record<string, unknown> = {
-    model: opts.model || getModel(env),
+    model,
     messages,
     temperature: opts.temperature ?? 0.7,
-    // Reasoning models spend thinking tokens against this cap; 4096 was getting
-    // exhausted mid-tool-call in context-heavy rounds (finish_reason: length).
-    max_tokens: opts.max_tokens ?? 8192,
+    // Reasoning models (Qwen, QwQ) spend hidden thinking tokens against this
+    // cap. 8192 is fine for DeepSeek; reasoning models need more headroom so
+    // thinking doesn't crowd out tool calls.
+    max_tokens: opts.max_tokens ?? (isReasoning ? 16384 : 8192),
     stream: true,
     stream_options: { include_usage: true },
   }

@@ -15,6 +15,15 @@ function isDeepSeek(env: Env, agentModel?: string | null): boolean {
   return getModel(env, agentModel).toLowerCase().includes('deepseek')
 }
 
+function isReasoningModel(env: Env, agentModel?: string | null): boolean {
+  const m = getModel(env, agentModel).toLowerCase()
+  return m.includes('qwen') || m.includes('qwq')
+}
+
+function stripThinkTags(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/^\s+/, '')
+}
+
 interface AgentContext {
   env: Env
   conversationId: string
@@ -91,6 +100,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     let finishReason: string | null = null
     const announced = new Set<string>() // tool ids already shown to the client
     const dsmlFilter = isDeepSeek(env, agentModel) ? new DsmlStreamFilter() : null
+    const thinkModel = isReasoningModel(env, agentModel)
 
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
     // telling the client to discard the truncated partial first. The provider's
@@ -168,6 +178,11 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         for (const tc of dsmlCalls) toolCalls.push(tc)
       }
     }
+
+    // Strip <think>...</think> blocks from reasoning models (Qwen, QwQ).
+    // OpenRouter usually strips the tags but may leak thinking content; this
+    // cleans it from the saved text so it doesn't pollute future context.
+    if (thinkModel) assistantText = stripThinkTags(assistantText)
 
     for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
     const calls = toolCalls.filter(tc => tc && tc.function.name)
@@ -270,6 +285,7 @@ export async function runMemoryPass(ctx: AgentContext): Promise<void> {
         console.error(`[runMemoryPass] recovered ${parsed.toolCalls.length} tool call(s) from DeepSeek DSML text`)
       }
     }
+    if (isReasoningModel(env, agentModel)) text = stripThinkTags(text)
     const valid = toolCalls.filter(tc => tc && tc.function.name && isParseableArgs(tc.function.arguments))
     if (valid.length === 0) return
 
