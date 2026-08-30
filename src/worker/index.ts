@@ -9,6 +9,7 @@ import {
   oauthToken,
 } from './oauth'
 import { mcpHandler } from './mcp'
+import { shopPage, orderHandler } from './shop'
 
 export { AngelDO } from './durable-object'
 
@@ -35,6 +36,10 @@ app.post('/oauth/token', oauthToken)
 
 // MCP (Streamable HTTP)
 app.post('/mcp', mcpHandler)
+
+// Public shop page + order intake
+app.get('/shop', shopPage)
+app.post('/api/order', orderHandler)
 
 export default {
   fetch: app.fetch,

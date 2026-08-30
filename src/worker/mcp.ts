@@ -109,7 +109,7 @@ function doStub(env: Env) {
 async function callTool(env: Env, name: string, args: Record<string, unknown>, callerId: string): Promise<{ text: string; isError?: boolean }> {
   switch (name) {
     case 'chatroom_read': {
-      const since = args.since as string | undefined
+      const since = (args.since as string | undefined)?.replace('T', ' ').replace('Z', '')
       const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200)
       let rows
       if (since) {

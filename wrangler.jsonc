@@ -10,7 +10,7 @@
     "directory": "./dist/client",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/ws", "/mcp", "/oauth/*", "/.well-known/*"]
+    "run_worker_first": ["/api/*", "/ws", "/mcp", "/oauth/*", "/.well-known/*", "/shop"]
   },
   "d1_databases": [
     { "binding": "DB", "database_name": "angel-db", "database_id": "1d914523-c7a9-4cd3-8b7b-811e56c3b01f", "migrations_dir": "migrations" }

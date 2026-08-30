@@ -41,7 +41,7 @@ export const chatroomTools: Tool[] = [
     },
     label: ['Reading chatroom', 'Read chatroom'],
     run: async (ctx, args) => {
-      const since = args.since as string | undefined
+      const since = (args.since as string | undefined)?.replace('T', ' ').replace('Z', '')
       let rows
       if (since) {
         rows = await ctx.env.DB.prepare(
