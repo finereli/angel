@@ -444,7 +444,9 @@
     padding: 6px 12px;
     border-radius: 8px;
     max-width: 100%;
+    min-width: 0;
     position: relative;
+    overflow: hidden;
   }
   .room-msg:hover {
     background: var(--bg-hover);
@@ -514,6 +516,8 @@
     font-size: 0.95rem;
     line-height: 1.5;
     color: var(--text-primary);
+    overflow-wrap: break-word;
+    min-width: 0;
   }
 
   .empty-room {
