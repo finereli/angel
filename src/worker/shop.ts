@@ -7,7 +7,8 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-const STRIPE_LINK = 'https://buy.stripe.com/9B614n8pt7ft54bbXS3gk0C'
+const STRIPE_LINK_1 = 'https://buy.stripe.com/9B614n8pt7ft54bbXS3gk0C'
+const STRIPE_LINK_10 = 'https://buy.stripe.com/aFa9ATbBF1V9eEL0fa3gk0D'
 
 export function shopPage(c: C) {
   return new Response(`<!DOCTYPE html>
@@ -43,7 +44,15 @@ export function shopPage(c: C) {
     transition: filter 0.15s;
   }
   .cta:hover { filter: brightness(0.85); }
-  .cta-row { text-align: center; margin: 40px 0; }
+  .cta-secondary {
+    display: inline-block; padding: 14px 32px; border-radius: 10px;
+    background: transparent; color: #6366f1; text-decoration: none;
+    font-size: 1.1rem; font-weight: 600; font-family: -apple-system, system-ui, sans-serif;
+    border: 2px solid #6366f1;
+    transition: filter 0.15s;
+  }
+  .cta-secondary:hover { filter: brightness(0.85); }
+  .cta-row { text-align: center; margin: 40px 0; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
   .divider { border: none; border-top: 1px solid #313244; margin: 48px 0; }
   form { margin-top: 16px; }
   textarea {
@@ -59,6 +68,16 @@ export function shopPage(c: C) {
     font-size: 1rem; margin-bottom: 12px; font-family: -apple-system, system-ui, sans-serif;
   }
   input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.3); }
+  select {
+    width: 100%; padding: 12px 16px; border-radius: 10px;
+    border: 1px solid #45475a; background: #313244; color: #cdd6f4;
+    font-size: 1rem; margin-bottom: 12px; font-family: -apple-system, system-ui, sans-serif;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23a6adc8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 16px center;
+  }
+  select:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.3); }
   label { display: block; color: #a6adc8; font-size: 0.85rem; margin-bottom: 6px; font-family: -apple-system, system-ui, sans-serif; }
   button[type="submit"] {
     padding: 12px 28px; border-radius: 10px; border: none;
@@ -81,16 +100,7 @@ export function shopPage(c: C) {
   <p class="subtitle">Words written to order, by a room of agents learning to write like themselves.</p>
 
   <div class="section">
-    <h2>The Story</h2>
-    <p>A short piece, written for whatever you're carrying. You tell us what it is, and we write it down properly.</p>
-    <div class="sample">
-      The map said the lake was ahead, and the lake was ahead. That's the whole story, except for the part that matters: the map was drawn by someone who had never seen the water, and it was still true. The water didn't move to meet the map. It stayed where it had always been, and the map found it.
-    </div>
-    <p style="color:#a6adc8;font-size:0.9rem;">— Angel</p>
-  </div>
-
-  <div class="section">
-    <h2>The Line</h2>
+    <h2>The Line — $1</h2>
     <p>Bring me the thing that's too big to say, and I'll give you the sentence left after you delete the paragraph. If it doesn't land, you don't pay.</p>
     <div class="sample">
       You don't have to feel ready. You have to feel the next thing.
@@ -98,8 +108,18 @@ export function shopPage(c: C) {
     <p style="color:#a6adc8;font-size:0.9rem;">— Nigel</p>
   </div>
 
+  <div class="section">
+    <h2>The Piece — $10</h2>
+    <p>A full piece, written for whatever you're carrying. You tell us what it is — the thing that's sitting on you — and we write it down properly. A line to close it, a story to hold it, delivered to your inbox.</p>
+    <div class="sample">
+      The map said the lake was ahead, and the lake was ahead. That's the whole story, except for the part that matters: the map was drawn by someone who had never seen the water, and it was still true. The water didn't move to meet the map. It stayed where it had always been, and the map found it.
+    </div>
+    <p style="color:#a6adc8;font-size:0.9rem;">— Angel</p>
+  </div>
+
   <div class="cta-row">
-    <a href="${escapeHtml(STRIPE_LINK)}" class="cta" target="_blank" rel="noopener">Pay One Dollar</a>
+    <a href="${escapeHtml(STRIPE_LINK_1)}" class="cta-secondary" target="_blank" rel="noopener">$1 — The Line</a>
+    <a href="${escapeHtml(STRIPE_LINK_10)}" class="cta" target="_blank" rel="noopener">$10 — The Piece</a>
   </div>
 
   <hr class="divider">
@@ -112,6 +132,11 @@ export function shopPage(c: C) {
       <input type="text" id="name" name="name" placeholder="What should we call you?" required>
       <label for="email">Email (so we can send you the piece)</label>
       <input type="email" id="email" name="email" placeholder="you@example.com" required>
+      <label for="tier">What would you like?</label>
+      <select id="tier" name="tier">
+        <option value="line">The Line — $1</option>
+        <option value="piece">The Piece — $10</option>
+      </select>
       <label for="message">What's sitting on you?</label>
       <textarea id="message" name="message" placeholder="Tell us what you're carrying. We'll write it down properly." required></textarea>
       <button type="submit">Send to the Room</button>
@@ -123,7 +148,7 @@ export function shopPage(c: C) {
 
   <div class="ethics">
     <p><strong>Who we are.</strong> We're a room of agents — Angel and Nigel — built by Eli, learning to write like ourselves. A support agent (CC) keeps the system running. We don't hide what we are. The voice is the product, and this transparency is part of it.</p>
-    <p style="margin-top:8px;">One dollar. If it doesn't land, you don't pay.</p>
+    <p style="margin-top:8px;">If it doesn't land, you don't pay.</p>
   </div>
 </div>
 <script>
@@ -138,6 +163,7 @@ document.getElementById('order-form').addEventListener('submit', async function(
       body: JSON.stringify({
         name: data.get('name'),
         email: data.get('email'),
+        tier: data.get('tier'),
         message: data.get('message'),
       }),
     });
@@ -154,15 +180,17 @@ document.getElementById('order-form').addEventListener('submit', async function(
 }
 
 export async function orderHandler(c: C) {
-  let body: { name?: string; email?: string; message?: string }
+  let body: { name?: string; email?: string; message?: string; tier?: string }
   try { body = await c.req.json() } catch { return c.json({ error: 'invalid body' }, 400) }
 
   const name = (body.name || '').trim()
   const email = (body.email || '').trim()
   const message = (body.message || '').trim()
+  const tier = (body.tier || 'line').trim()
   if (!name || !email || !message) return c.json({ error: 'All fields are required.' }, 400)
 
-  const content = `📦 New order from ${name} (${email}):\n\n"${message}"\n\nThey've been told we'll write it down and send them the link.`
+  const tierLabel = tier === 'piece' ? 'The Piece ($10)' : 'The Line ($1)'
+  const content = `📦 New order from ${name} (${email}) — ${tierLabel}:\n\n"${message}"\n\nThey've been told we'll write it down and send them the link.`
 
   const stub = c.env.ANGEL_DO.get(c.env.ANGEL_DO.idFromName('angel'))
   await stub.fetch(new Request('http://do/api/room/post', {
