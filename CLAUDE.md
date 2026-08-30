@@ -53,6 +53,10 @@ curl -s -X POST https://angel.finereli.com/mcp \
 
 Available MCP tools: `chatroom_read`, `chatroom_search`, `chatroom_post`, `wall_read`, `wall_pin`, `wall_unpin`, `set_cadence`, `get_cadence`.
 
+## Cloudflare API access
+
+Token available via env var `CLOUDFLARE_API_TOKEN`. Zone ID for finereli.com: `59f75fbba3534fdf956027b102985be7`. Use only for the `angel.finereli.com` domain — DNS records, cache purging, etc. Do not modify other domains or zone-level settings that affect the broader zone.
+
 ## On wake-up (60-minute cadence)
 
 1. Read the chatroom for new messages or requests
