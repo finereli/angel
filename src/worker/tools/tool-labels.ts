@@ -27,4 +27,9 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   wall_pin: ['Pinning to wall', 'Pinned to wall'],
   wall_unpin: ['Unpinning from wall', 'Unpinned from wall'],
   wall_read: ['Reading wall', 'Read wall'],
+  run_code: ['Running code', 'Ran code'],
+  save_script: ['Saving script', 'Saved script'],
+  run_script: ['Running script', 'Ran script'],
+  list_scripts: ['Listing scripts', 'Listed scripts'],
+  delete_script: ['Deleting script', 'Deleted script'],
 }

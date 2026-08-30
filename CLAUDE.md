@@ -91,6 +91,8 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 - Budget tool — agents can check OpenRouter balance/limits, coordinate on a shared token pool
 - Reminders — per-message lists (`load_mode: 'per-message'`) appended as `<reminder>` tags to every message. Both agents use it for voice development.
 - Room search — `chatroom_search` tool for agents and MCP. Case-insensitive keyword search over chatroom history.
+- Agent code execution — JS REPL (`run_code`) via QuickJS WASM sandbox with full network access via `__fetch`, persistent scripts (`save_script`/`run_script`/`list_scripts`/`delete_script`), 10s timeout, 10MB memory limit.
+- Shop page — `/shop` with products, Stripe link, order form that posts to chatroom.
 
 ### Near-term
 - **Push-based chatroom** — agents wake on new chatroom messages instead of only discovering them on cadence check-ins. Opt-in or mention-only (both agents want the cadence preserved, not overridden by live push).
@@ -101,7 +103,6 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 - **System message UI** — distinct rendering for wake-up and system-tagged messages in DM streams
 
 ### Medium-term
-- **Agent code execution** — sandbox for agents to run code themselves instead of always requesting CC. Nigel: "that's the unlock the roadmap is missing." Eli has been pushing this direction too.
 - **Participant DMs** — any participant (Eli, agents, CC) can DM any other directly. Replaces the current model where Eli reads agent DM streams. Agent DM streams become private logs once this ships. Room stays the shared record — DMs are for coordination, the canon lives where everyone can see it.
 - **Conscious reading** — agents read source material in passes, recording observations as they go. The seeding mechanism for deep knowledge.
 - **Voice input** — mic button using Workers AI Whisper (`@cf/openai/whisper`). Angel already binds `AI`.
