@@ -553,7 +553,7 @@
   }
 
   .input-area {
-    padding: 12px 16px;
+    padding: 12px 16px calc(12px + var(--safe-bottom));
     border-top: 1px solid var(--border);
     background: var(--bg-surface);
     flex-shrink: 0;

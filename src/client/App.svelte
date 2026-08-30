@@ -210,7 +210,7 @@
 <style>
   .app {
     display: flex;
-    height: 100dvh;
+    height: 100%;
     overflow: hidden;
   }
 
