@@ -7,7 +7,7 @@ import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
 import { renderStreamContext, type Pair } from './stream-pyramid'
 import { DsmlStreamFilter, parseDsml } from './dsml'
 
-const MAX_TOOL_ROUNDS = 12
+const MAX_TOOL_ROUNDS = 200
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
