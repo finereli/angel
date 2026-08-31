@@ -12,6 +12,9 @@ import { mcpHandler } from './mcp'
 import { shopPage, orderHandler } from './shop'
 import { respondPage, respondHandler } from './respond'
 import { rewriteHandler } from './rewrite'
+import { paymentMiddleware, x402ResourceServer } from '@x402/hono'
+import { HTTPFacilitatorClient } from '@x402/core/server'
+import { ExactEvmScheme } from '@x402/evm/exact/server'
 
 export { AngelDO } from './durable-object'
 
@@ -47,8 +50,33 @@ app.post('/api/order', orderHandler)
 app.get('/respond/:slug', respondPage)
 app.post('/api/respond/:slug', respondHandler)
 
-// Rewrite API — rewrites machine-generated text in a human register.
-// TODO: gate with x402 payment middleware once @x402/hono is installed.
+// x402 payment gate for the rewrite API (Base Sepolia testnet, $0.25/request).
+// Falls through without payment when X402_WALLET_ADDRESS is not set.
+let x402Middleware: ReturnType<typeof paymentMiddleware> | null = null
+app.use('/api/rewrite', async (c, next) => {
+  const wallet = c.env.X402_WALLET_ADDRESS
+  if (!wallet) return next()
+  if (!x402Middleware) {
+    const facilitator = new HTTPFacilitatorClient({ url: 'https://x402.org/facilitator' })
+    const server = new x402ResourceServer(facilitator)
+    server.register('eip155:84532', new ExactEvmScheme())
+    x402Middleware = paymentMiddleware(
+      {
+        'POST /api/rewrite': {
+          accepts: {
+            scheme: 'exact',
+            price: '$0.25',
+            network: 'eip155:84532',
+            payTo: wallet,
+          },
+          description: 'Rewrite machine-generated text in a human register',
+        },
+      },
+      server,
+    )
+  }
+  return x402Middleware(c, next)
+})
 app.post('/api/rewrite', rewriteHandler)
 
 export default {

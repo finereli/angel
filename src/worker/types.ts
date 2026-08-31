@@ -7,6 +7,7 @@ export interface Env {
   OPENROUTER_API_KEY: string
   DEEPSEEK_MODEL?: string
   RESEND_API_KEY?: string
+  X402_WALLET_ADDRESS?: string
 }
 
 // DB row types
