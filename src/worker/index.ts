@@ -240,6 +240,27 @@ app.get('/.well-known/agent-card.json', (c) => {
   })
 })
 
+// Mirror the payment-required header into the 402 body so crawlers and
+// v1-compatible clients can read the challenge without parsing the header.
+// Registered BEFORE the x402 middleware so it wraps around it.
+app.use('/api/rewrite', async (c, next) => {
+  await next()
+  if (c.res.status === 402) {
+    const prHeader = c.res.headers.get('payment-required')
+    if (prHeader) {
+      try {
+        const requirements = JSON.parse(atob(prHeader))
+        requirements.documentation = 'https://angel.finereli.com/llms.txt'
+        requirements.llms = 'https://angel.finereli.com/llms.txt'
+        requirements.openapi = 'https://angel.finereli.com/openapi.json'
+        const headers = new Headers(c.res.headers)
+        headers.set('content-type', 'application/json')
+        c.res = new Response(JSON.stringify(requirements), { status: 402, headers })
+      } catch {}
+    }
+  }
+})
+
 // x402 payment gate for the rewrite API (Base mainnet, $0.25/request).
 // Falls through without payment when X402_WALLET_ADDRESS is not set.
 let x402Middleware: ReturnType<typeof paymentMiddleware> | null = null
