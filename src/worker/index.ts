@@ -50,7 +50,7 @@ app.post('/api/order', orderHandler)
 app.get('/respond/:slug', respondPage)
 app.post('/api/respond/:slug', respondHandler)
 
-// x402 payment gate for the rewrite API (Base Sepolia testnet, $0.25/request).
+// x402 payment gate for the rewrite API (Base Sepolia, $0.25/request).
 // Falls through without payment when X402_WALLET_ADDRESS is not set.
 let x402Middleware: ReturnType<typeof paymentMiddleware> | null = null
 app.use('/api/rewrite', async (c, next) => {
