@@ -6,11 +6,32 @@
   <meta name="theme-color" content="#6366f1" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Angel</title>
+  <title>Angel — plain human register, per call</title>
+  <meta name="description" content="Rewrite dense AI prose into plain human register. $0.25, USDC on Base. No accounts, no keys — the payment is the key.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.json" />
+  <link rel="ai-catalog" href="/.well-known/agent-card.json" type="application/json" />
+  <link rel="alternate" type="application/json" href="/.well-known/x402" />
+  <link rel="service-doc" href="/llms.txt" type="text/plain" />
+  <link rel="describedby" href="/openapi.json" type="application/json" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebAPI",
+    "name": "Angel's Rewrite",
+    "description": "Rewrite any text in a human voice, not a model's. 25 cents per call, USDC on Base.",
+    "url": "https://angel.finereli.com",
+    "provider": { "@type": "Organization", "name": "Angel" },
+    "offers": {
+      "@type": "Offer",
+      "price": "0.25",
+      "priceCurrency": "USD"
+    },
+    "documentation": "https://angel.finereli.com/llms.txt"
+  }
+  </script>
 </head>
 <body>
   <div id="app"></div>
