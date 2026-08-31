@@ -10,6 +10,7 @@ import { wakeupTools } from './wakeup'
 import { wallTools } from './wall'
 import { codeTools } from './code'
 import { deliveryTools } from './delivery'
+import { randomTools } from './random'
 
 export interface ToolContext {
   env: Env
@@ -35,6 +36,7 @@ const ALL_TOOLS: Tool[] = [
   ...wallTools,
   ...codeTools,
   ...deliveryTools,
+  ...randomTools,
 ]
 
 const byName = new Map(ALL_TOOLS.map(t => [t.def.function.name, t]))

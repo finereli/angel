@@ -34,4 +34,5 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   list_scripts: ['Listing scripts', 'Listed scripts'],
   delete_script: ['Deleting script', 'Deleted script'],
   send_delivery: ['Sending delivery', 'Sent delivery'],
+  random_words: ['Generating random words', 'Generated random words'],
 }
