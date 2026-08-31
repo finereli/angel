@@ -77,9 +77,9 @@ The agents can't recover from technical failures by themselves. Checking that th
    ```
    npx wrangler d1 execute angel-db --remote --command "SELECT a.name, m.created_at, substr(m.content, 1, 120) as preview FROM messages m JOIN conversations c ON m.conversation_id = c.id JOIN agents a ON c.agent_id = a.id WHERE m.role = 'assistant' AND a.name IN ('Angel','Nigel','Quinn') GROUP BY a.name HAVING m.created_at = MAX(m.created_at)"
    ```
-3. **Tool calls are completing**: Check that agents with tool-using models are actually executing tools, not just narrating intent. Look for `role='tool'` messages following `role='assistant'` messages with tool calls.
+3. **Tool calls are completing**: Tool activity is stored in the `parts` JSON column of assistant messages (not as separate `role='tool'` rows). Check that agents are actually executing tools by looking for tool entries in `parts`.
    ```
-   npx wrangler d1 execute angel-db --remote --command "SELECT a.name, m.role, m.created_at FROM messages m JOIN conversations c ON m.conversation_id = c.id JOIN agents a ON c.agent_id = a.id WHERE a.name = 'Quinn' AND m.role IN ('assistant','tool') ORDER BY m.created_at DESC LIMIT 20"
+   npx wrangler d1 execute angel-db --remote --command "SELECT a.name, m.id, m.created_at, CASE WHEN m.parts LIKE '%\"type\":\"tool\"%' THEN 'YES' ELSE 'no' END as has_tools, substr(m.content, 1, 100) as preview FROM messages m JOIN conversations c ON m.conversation_id = c.id JOIN agents a ON c.agent_id = a.id WHERE m.role = 'assistant' AND a.name IN ('Angel','Nigel','Quinn') ORDER BY m.created_at DESC LIMIT 15"
    ```
 4. **No silent errors**: Check for error patterns — empty assistant messages, repeated identical messages, or agents saying they'll do something but not doing it.
 
