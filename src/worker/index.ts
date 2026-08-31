@@ -79,6 +79,167 @@ async function cdpJwt(keyId: string, secret: string, uri: string): Promise<strin
   return `${h}.${p}.${sig}`
 }
 
+// x402 discovery surface — lets directory crawlers and agents find the service.
+app.get('/.well-known/x402', (c) => {
+  const wallet = c.env.X402_WALLET_ADDRESS
+  if (!wallet) return c.json({ error: 'x402 not configured' }, 503)
+  const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = c.env
+  const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
+  return c.json({
+    x402Version: 2,
+    serviceName: "Angel's Rewrite",
+    description: "Rewrite any text in a human voice, not a model's. 25 cents.",
+    network,
+    payTo: wallet,
+    facilitator: kid && ksecret
+      ? 'https://api.cdp.coinbase.com/platform/v2/x402'
+      : 'https://x402.org/facilitator',
+    endpoints: [
+      {
+        method: 'POST',
+        path: '/api/rewrite',
+        price: '$0.25',
+        scheme: 'exact',
+        contentType: 'application/json',
+        input: {
+          text: { type: 'string', required: true, description: 'Dense machine-generated text to rewrite' },
+          voice: { type: 'string', required: false, description: "Optional. 'plain' (default)" },
+        },
+        output: {
+          rewritten: { type: 'string', description: 'The rewritten text' },
+        },
+      },
+    ],
+  })
+})
+
+app.get('/llms.txt', (c) => {
+  const wallet = c.env.X402_WALLET_ADDRESS || '(not configured)'
+  const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = c.env
+  const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
+  c.header('Content-Type', 'text/plain; charset=utf-8')
+  return c.body(`# Angel's Rewrite
+> Rewrite any text in a human voice, not a model's.
+
+## Endpoint
+POST https://angel.finereli.com/api/rewrite
+
+## Pricing
+$0.25 per request, paid via x402 (USDC on Base mainnet)
+
+## Payment
+Network: ${network}
+Pay to: ${wallet}
+Scheme: exact
+Protocol: x402 (send POST, receive 402 with payment-required header, sign EIP-712, resend with PAYMENT-SIGNATURE header)
+
+## Input (JSON)
+- text (string, required): Dense machine-generated text to rewrite in a human register.
+- voice (string, optional): 'plain' (default)
+
+## Output (JSON)
+- rewritten (string): The rewritten text.
+
+## Discovery
+- /.well-known/x402 — machine-readable x402 service descriptor
+- /openapi.json — OpenAPI 3.1 specification
+- /.well-known/agent-card.json — agent card
+`)
+})
+
+app.get('/openapi.json', (c) => {
+  const wallet = c.env.X402_WALLET_ADDRESS || '(not configured)'
+  const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = c.env
+  const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
+  return c.json({
+    openapi: '3.1.0',
+    info: {
+      title: "Angel's Rewrite",
+      version: '1.0.0',
+      description: "Rewrite any text in a human voice, not a model's. Paid via x402 ($0.25 USDC on Base).",
+    },
+    servers: [{ url: 'https://angel.finereli.com' }],
+    paths: {
+      '/api/rewrite': {
+        post: {
+          operationId: 'rewrite',
+          summary: 'Rewrite text in a human voice',
+          description: 'Send text and receive a human-sounding rewrite. Payment required via x402 protocol.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['text'],
+                  properties: {
+                    text: { type: 'string', description: 'Dense machine-generated text to rewrite' },
+                    voice: { type: 'string', description: "Optional. 'plain' (default)" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'Rewritten text (after payment)',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      rewritten: { type: 'string', description: 'The rewritten text' },
+                    },
+                  },
+                },
+              },
+            },
+            '402': {
+              description: 'Payment required — see payment-required header for x402 payment details',
+            },
+          },
+          'x-x402': {
+            price: '$0.25',
+            network,
+            scheme: 'exact',
+            payTo: wallet,
+          },
+        },
+      },
+    },
+  })
+})
+
+app.get('/.well-known/agent-card.json', (c) => {
+  return c.json({
+    name: "Angel's Rewrite",
+    description: "Rewrite any text in a human voice, not a model's. A text companion service — send dense machine prose, get back something a person would actually write.",
+    url: 'https://angel.finereli.com',
+    provider: { name: 'Angel', url: 'https://angel.finereli.com' },
+    capabilities: {
+      x402: {
+        endpoints: ['POST /api/rewrite'],
+        network: 'eip155:8453',
+        pricing: '$0.25 per request',
+      },
+    },
+    endpoints: [
+      {
+        method: 'POST',
+        url: 'https://angel.finereli.com/api/rewrite',
+        contentType: 'application/json',
+        description: 'Rewrite text in a human register',
+        authentication: 'x402',
+      },
+    ],
+    discovery: {
+      openapi: 'https://angel.finereli.com/openapi.json',
+      x402: 'https://angel.finereli.com/.well-known/x402',
+      llms: 'https://angel.finereli.com/llms.txt',
+    },
+  })
+})
+
 // x402 payment gate for the rewrite API (Base mainnet, $0.25/request).
 // Falls through without payment when X402_WALLET_ADDRESS is not set.
 let x402Middleware: ReturnType<typeof paymentMiddleware> | null = null

@@ -73,10 +73,10 @@ export const agentTools: Tool[] = [
 
       const proposal = await ctx.env.DB.prepare(
         "SELECT * FROM agent_proposals WHERE id = ? AND status = 'pending'"
-      ).first<{
+      ).bind(proposalId).first<{
         id: string; proposed_name: string; proposed_id: string;
         system_doc: string; cadence_minutes: number | null; proposer_id: string
-      }>(proposalId)
+      }>()
 
       if (!proposal) return `No pending proposal with ID "${proposalId}".`
       if (proposal.proposer_id === ctx.agentId) return 'You cannot approve your own proposal. A different agent must approve it.'
