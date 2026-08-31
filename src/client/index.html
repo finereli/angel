@@ -34,31 +34,184 @@
   </script>
 </head>
 <body>
-  <div id="catalog" style="max-width:640px;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.6;color:#222">
-    <h1>Angel's Rewrite</h1>
-    <p>Rewrite any text in a human voice, not a model's. You send the text, we send it back readable. <strong>$0.25 per call</strong>, USDC on Base. No accounts, no keys — the payment is the key.</p>
-    <h2>Endpoint</h2>
+  <div id="catalog" style="max-width:720px;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.6;color:#222">
+    <h1>Angel's Rewrite — Service Catalog</h1>
+    <p>Rewrite any text in a human voice, not a model's. You send dense machine-generated prose, we send it back in plain human register — the kind of writing a person would actually produce. <strong>$0.25 per call</strong>, USDC on Base mainnet. No accounts, no API keys, no signup — the x402 payment is the only authentication.</p>
+
+    <h2>Service Overview</h2>
     <table style="border-collapse:collapse;width:100%">
-      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:4px 8px">Method</th><th style="padding:4px 8px">Path</th><th style="padding:4px 8px">Price</th><th style="padding:4px 8px">Description</th></tr></thead>
-      <tbody><tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px"><code>POST</code></td><td style="padding:4px 8px"><a href="/api/rewrite">/api/rewrite</a></td><td style="padding:4px 8px">$0.25</td><td style="padding:4px 8px">Rewrite text in a human register</td></tr></tbody>
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Property</th><th style="padding:6px 8px">Value</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Service Name</td><td style="padding:6px 8px">Angel's Rewrite</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Category</td><td style="padding:6px 8px">Editing / Text Transformation</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Provider</td><td style="padding:6px 8px">Angel (<a href="https://angel.finereli.com">angel.finereli.com</a>)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Protocol</td><td style="padding:6px 8px"><a href="https://x402.org">x402</a> (HTTP 402 Payment Required)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Network</td><td style="padding:6px 8px">Base mainnet (eip155:8453)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Asset</td><td style="padding:6px 8px">USDC (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Payment Scheme</td><td style="padding:6px 8px">exact (EIP-712 typed data signature)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Facilitator</td><td style="padding:6px 8px">Coinbase CDP (api.cdp.coinbase.com/platform/v2/x402)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">x402 Version</td><td style="padding:6px 8px">2</td></tr>
+      </tbody>
     </table>
-    <h2>How it works</h2>
+
+    <h2>API Endpoints</h2>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Method</th><th style="padding:6px 8px">Path</th><th style="padding:6px 8px">Price</th><th style="padding:6px 8px">Description</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>POST</code></td><td style="padding:6px 8px"><a href="/api/rewrite">/api/rewrite</a></td><td style="padding:6px 8px">$0.25 USDC</td><td style="padding:6px 8px">Rewrite text in a human register. Accepts dense machine-generated prose and returns it rewritten in a natural human voice.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>POST /api/rewrite — Full Specification</h3>
+    <h4>Request</h4>
+    <p>Content-Type: <code>application/json</code></p>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Field</th><th style="padding:6px 8px">Type</th><th style="padding:6px 8px">Required</th><th style="padding:6px 8px">Description</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>text</code></td><td style="padding:6px 8px">string</td><td style="padding:6px 8px">Yes</td><td style="padding:6px 8px">The dense machine-generated text to rewrite. Can be any length — paragraphs, articles, emails, documentation. The text should be comprehensible but written in a style that reads as AI-generated or overly formal.</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>voice</code></td><td style="padding:6px 8px">string</td><td style="padding:6px 8px">No</td><td style="padding:6px 8px">The voice style to use. Default: <code>"plain"</code>. Plain human register — clear, direct, conversational without being casual. The kind of writing a thoughtful person produces when they are explaining something they understand.</td></tr>
+      </tbody>
+    </table>
+    <p>Example request body:</p>
+    <pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto"><code>{
+  "text": "The implementation leverages a multi-faceted approach to textual transformation, utilizing advanced natural language processing capabilities to systematically identify and remediate instances of overly complex or artificially generated prose patterns.",
+  "voice": "plain"
+}</code></pre>
+
+    <h4>Response (200 OK, after payment)</h4>
+    <p>Content-Type: <code>application/json</code></p>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Field</th><th style="padding:6px 8px">Type</th><th style="padding:6px 8px">Description</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>rewritten</code></td><td style="padding:6px 8px">string</td><td style="padding:6px 8px">The text rewritten in a human register. Same meaning, different voice — shorter sentences, concrete words, natural rhythm.</td></tr>
+      </tbody>
+    </table>
+    <p>Example response:</p>
+    <pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto"><code>{
+  "rewritten": "It rewrites text to sound human. It finds the parts that read like a machine wrote them and fixes the phrasing."
+}</code></pre>
+
+    <h4>Response (402 Payment Required, before payment)</h4>
+    <p>The first request without payment returns HTTP 402 with the payment challenge. The challenge contains everything needed to construct and sign the payment:</p>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Field</th><th style="padding:6px 8px">Description</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>x402Version</code></td><td style="padding:6px 8px">Protocol version (2)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>resource.url</code></td><td style="padding:6px 8px">The endpoint URL being paid for</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>resource.description</code></td><td style="padding:6px 8px">Human-readable description of the service</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>resource.serviceName</code></td><td style="padding:6px 8px">Service name: "Angel's Rewrite"</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>resource.tags</code></td><td style="padding:6px 8px">Service tags: ["rewrite", "editing", "prose", "voice"]</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].scheme</code></td><td style="padding:6px 8px">Payment scheme: "exact"</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].network</code></td><td style="padding:6px 8px">Blockchain network: "eip155:8453" (Base mainnet)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].amount</code></td><td style="padding:6px 8px">Price in micro-units: "250000" ($0.25 USDC, where 1,000,000 = $1)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].asset</code></td><td style="padding:6px 8px">Token contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (USDC on Base)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].payTo</code></td><td style="padding:6px 8px">Seller wallet address</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].maxTimeoutSeconds</code></td><td style="padding:6px 8px">Payment validity window: 300 seconds</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].extra.bazaar</code></td><td style="padding:6px 8px">Bazaar discovery metadata: category, discoverable flag, tags</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>extensions.bazaar</code></td><td style="padding:6px 8px">Full discovery extension with input/output schemas and examples</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Error Responses</h4>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Status</th><th style="padding:6px 8px">Meaning</th><th style="padding:6px 8px">Body</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">402</td><td style="padding:6px 8px">Payment Required</td><td style="padding:6px 8px">Payment challenge with full x402 requirements (see above)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">400</td><td style="padding:6px 8px">Bad Request</td><td style="padding:6px 8px">Missing or invalid <code>text</code> field</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">500</td><td style="padding:6px 8px">Internal Server Error</td><td style="padding:6px 8px">Rewrite processing failed</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Payment Flow (x402 Protocol)</h2>
+    <p>The x402 protocol enables per-request micropayments without accounts or API keys. The payment itself is the authentication. Here is the complete flow:</p>
     <ol>
-      <li>Send a POST to <a href="/api/rewrite">/api/rewrite</a> with <code>{"text": "your text"}</code></li>
-      <li>Receive a 402 with payment requirements (x402 protocol)</li>
-      <li>Sign the EIP-712 typed data with your wallet</li>
-      <li>Resend with the <code>PAYMENT-SIGNATURE</code> header</li>
-      <li>Receive <code>{"rewritten": "..."}</code></li>
+      <li><strong>Initial request:</strong> Send a POST to <code>/api/rewrite</code> with your text in the JSON body. No authentication headers needed.</li>
+      <li><strong>Receive 402:</strong> The server returns HTTP 402 Payment Required. The response body contains the full payment challenge as JSON. The <code>payment-required</code> header contains the same data base64-encoded.</li>
+      <li><strong>Parse requirements:</strong> Read <code>accepts[0]</code> from the 402 body. This gives you the network (Base), asset (USDC), amount (250000 = $0.25), and payTo address.</li>
+      <li><strong>Construct EIP-712 typed data:</strong> Build the EIP-712 message per the x402 "exact" scheme. The typed data includes the amount, asset, recipient, nonce, and expiry.</li>
+      <li><strong>Sign with your wallet:</strong> Sign the EIP-712 typed data with an EVM wallet that holds USDC on Base mainnet. This authorizes the exact payment amount — no more, no less. The signing is gasless (EIP-3009 transferWithAuthorization).</li>
+      <li><strong>Resend with payment:</strong> Send the same POST request again, this time with the <code>PAYMENT-SIGNATURE</code> header containing the signed payment payload (base64-encoded).</li>
+      <li><strong>Receive result:</strong> The facilitator verifies the signature, settles the USDC transfer, and the server returns the rewritten text as JSON.</li>
     </ol>
-    <h2>Discovery</h2>
-    <ul>
-      <li><a href="/.well-known/x402">/.well-known/x402</a> — x402 service descriptor</li>
-      <li><a href="/llms.txt">/llms.txt</a> — LLM-readable service description</li>
-      <li><a href="/openapi.json">/openapi.json</a> — OpenAPI 3.1 specification</li>
-      <li><a href="/.well-known/agent-card.json">/.well-known/agent-card.json</a> — agent card</li>
-    </ul>
-    <h2>Payment details</h2>
-    <p>Network: Base mainnet (eip155:8453) · Asset: USDC · Scheme: exact · Protocol: <a href="https://x402.org">x402</a></p>
+    <p>The entire flow is gasless for the payer. USDC is transferred via EIP-3009 (transferWithAuthorization), which requires only a signature — no ETH for gas. Settlement is handled by the Coinbase CDP facilitator.</p>
+
+    <h2>Integration Examples</h2>
+    <h3>Using the x402 JavaScript client</h3>
+    <pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto"><code>import { x402Client } from '@x402/core/client';
+import { registerExactEvmScheme } from '@x402/evm/exact/client';
+
+const client = x402Client();
+registerExactEvmScheme(client, { signer: yourWalletSigner });
+
+const response = await client.fetch('https://angel.finereli.com/api/rewrite', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ text: 'Your text to rewrite...' }),
+});
+const { rewritten } = await response.json();</code></pre>
+
+    <h3>Using curl (manual flow)</h3>
+    <pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto"><code># Step 1: Get the payment challenge
+curl -X POST https://angel.finereli.com/api/rewrite \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Your text here"}'
+# Returns 402 with payment requirements in body + payment-required header
+
+# Step 2: Sign the payment with your wallet (use x402 tooling)
+# Step 3: Resend with the signature
+curl -X POST https://angel.finereli.com/api/rewrite \
+  -H "Content-Type: application/json" \
+  -H "PAYMENT-SIGNATURE: &lt;base64-encoded-signed-payload&gt;" \
+  -d '{"text": "Your text here"}'
+# Returns 200 with {"rewritten": "..."}</code></pre>
+
+    <h2>Discovery Files</h2>
+    <p>Machine-readable service descriptors are available at standard paths for automated discovery by agents, crawlers, and directories:</p>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Path</th><th style="padding:6px 8px">Type</th><th style="padding:6px 8px">Description</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><a href="/.well-known/x402">/.well-known/x402</a></td><td style="padding:6px 8px">application/json</td><td style="padding:6px 8px">x402 service descriptor — full machine-readable specification including endpoint, pricing, network, payment scheme, input/output schema. The primary discovery document for x402-aware agents and directories.</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><a href="/llms.txt">/llms.txt</a></td><td style="padding:6px 8px">text/plain</td><td style="padding:6px 8px">LLM-readable service description in the llms.txt format. Contains endpoint URL, pricing, payment network, input/output format, and discovery links. Designed for large language models to understand the service without parsing JSON.</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><a href="/openapi.json">/openapi.json</a></td><td style="padding:6px 8px">application/json</td><td style="padding:6px 8px">OpenAPI 3.1 specification for the API. Includes endpoint paths, request/response schemas, x-x402 extension with pricing and payment details. Compatible with standard OpenAPI tooling.</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><a href="/.well-known/agent-card.json">/.well-known/agent-card.json</a></td><td style="padding:6px 8px">application/json</td><td style="padding:6px 8px">Agent card describing the service capabilities, provider, endpoints, and authentication method (x402). Used by agent directories and orchestrators to discover and route to this service.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Payment Details</h2>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Property</th><th style="padding:6px 8px">Value</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Network</td><td style="padding:6px 8px">Base mainnet (eip155:8453, chain ID 8453)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Asset</td><td style="padding:6px 8px">USDC — USD Coin (contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Price</td><td style="padding:6px 8px">$0.25 per request (250,000 micro-units, where 1,000,000 = $1.00)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Scheme</td><td style="padding:6px 8px">exact — EIP-712 typed data signature, EIP-3009 transferWithAuthorization</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Facilitator</td><td style="padding:6px 8px">Coinbase CDP (api.cdp.coinbase.com/platform/v2/x402)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Timeout</td><td style="padding:6px 8px">300 seconds (5 minutes) — payment signature must be submitted within this window</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Gas Cost</td><td style="padding:6px 8px">Zero for the payer — settlement uses gasless EIP-3009 (transferWithAuthorization)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Protocol</td><td style="padding:6px 8px"><a href="https://x402.org">x402</a> — open protocol for HTTP-native micropayments</td></tr>
+      </tbody>
+    </table>
+
+    <h2>About the Service</h2>
+    <p>Angel's Rewrite transforms dense, AI-generated or overly formal text into natural human prose. The rewrite preserves the original meaning while changing the voice — shorter sentences, concrete words, natural rhythm. It is not a summarizer (the output is the same length), not a translator (it stays in the same language), and not a grammar checker (it changes style, not correctness).</p>
+    <p>The service is designed for agents and applications that produce text for human readers. When an LLM generates a response, a report, or an email, the output often has a recognizable machine quality — hedging phrases, passive voice, unnecessary qualifiers, list-heavy structure. Angel's Rewrite fixes that register without changing the content.</p>
+    <p>Use cases include: agent-generated emails before they reach a person's inbox, customer-facing documentation produced by AI pipelines, automated reports where readability matters, and any workflow where machine-generated text needs to sound like a person wrote it.</p>
+    <p>The service runs on Cloudflare Workers with a D1 database backend. The rewrite is performed by a language model (DeepSeek via OpenRouter) with a system prompt tuned for register transformation — not creative writing, not simplification, just voice.</p>
+
+    <h2>Technical Details</h2>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Property</th><th style="padding:6px 8px">Value</th></tr></thead>
+      <tbody>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Infrastructure</td><td style="padding:6px 8px">Cloudflare Workers (edge compute, global)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Runtime</td><td style="padding:6px 8px">V8 isolates (Cloudflare Workers runtime)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Database</td><td style="padding:6px 8px">Cloudflare D1 (SQLite at the edge)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Language Model</td><td style="padding:6px 8px">DeepSeek (via OpenRouter)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Latency</td><td style="padding:6px 8px">Depends on text length — typically 2-10 seconds including LLM inference</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Rate Limits</td><td style="padding:6px 8px">Per-payment (no account-based rate limiting — each paid request is served)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">CORS</td><td style="padding:6px 8px">Enabled for cross-origin requests</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">TLS</td><td style="padding:6px 8px">Required (HTTPS only)</td></tr>
+      </tbody>
+    </table>
   </div>
   <div id="app"></div>
   <script type="module" src="./main.ts"></script>
