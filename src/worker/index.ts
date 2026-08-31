@@ -11,6 +11,7 @@ import {
 import { mcpHandler } from './mcp'
 import { shopPage, orderHandler } from './shop'
 import { respondPage, respondHandler } from './respond'
+import { rewriteHandler } from './rewrite'
 
 export { AngelDO } from './durable-object'
 
@@ -45,6 +46,10 @@ app.post('/api/order', orderHandler)
 // Respond / feedback pages
 app.get('/respond/:slug', respondPage)
 app.post('/api/respond/:slug', respondHandler)
+
+// Rewrite API — rewrites machine-generated text in a human register.
+// TODO: gate with x402 payment middleware once @x402/hono is installed.
+app.post('/api/rewrite', rewriteHandler)
 
 export default {
   fetch: app.fetch,
