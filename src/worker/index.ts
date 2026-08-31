@@ -34,6 +34,7 @@ app.get('/ws', async (c) => {
 
 // Health check (no auth)
 app.get('/api/health', (c) => c.json({ ok: true, name: 'Angel' }))
+app.get('/health', (c) => c.json({ ok: true, name: 'Angel' }))
 
 // Pure HTML catalog page — no JS, no app shell. The x402 auditor flags
 // pages that look client-rendered (script tags, app div). This page is
@@ -102,7 +103,9 @@ app.get('/', (c) => {
   <h2>API Endpoints</h2>
   <table>
     <tr><th>Method</th><th>Path</th><th>Price</th><th>Description</th></tr>
-    <tr><td><code>POST</code></td><td><a href="/api/rewrite">/api/rewrite</a></td><td>$0.25 USDC</td><td>Rewrite text in a human register. Accepts dense machine-generated prose and returns it rewritten in a natural human voice.</td></tr>
+    <tr><td><code>POST</code></td><td><a href="/api/rewrite">/api/rewrite</a></td><td>$0.25 USDC</td><td>Rewrite text in a human register. Full human-register transformation — shorter sentences, concrete words, natural rhythm.</td></tr>
+    <tr><td><code>POST</code></td><td><a href="/api/rewrite-lite">/api/rewrite-lite</a></td><td>$0.01 USDC</td><td>Same rewrite, entry price. Try the register before committing to the flagship tier.</td></tr>
+    <tr><td><code>GET</code></td><td><a href="/health">/health</a></td><td>Free</td><td>Health check. Returns <code>{"ok":true,"name":"Angel"}</code>.</td></tr>
   </table>
 
   <h3>POST /api/rewrite — Full Specification</h3>
@@ -397,11 +400,19 @@ app.get('/llms.txt', (c) => {
   return c.body(`# Angel's Rewrite
 > Rewrite any text in a human voice, not a model's.
 
-## Endpoint
-POST https://angel.finereli.com/api/rewrite
+## Endpoints
+
+### POST /api/rewrite — $0.25
+Full human-register transformation. Shorter sentences, concrete words, natural rhythm.
+
+### POST /api/rewrite-lite — $0.01
+Same rewrite service at entry price. Try the register before committing to the flagship tier.
+
+### GET /health — Free
+Health check. Returns {"ok":true,"name":"Angel"}.
 
 ## Pricing
-$0.25 per request, paid via x402 (USDC on Base mainnet)
+$0.25 (flagship) or $0.01 (lite) per request, paid via x402 (USDC on Base mainnet)
 
 ## Payment
 Network: ${network}
@@ -409,7 +420,7 @@ Pay to: ${wallet}
 Scheme: exact
 Protocol: x402 (send POST, receive 402 with payment-required header, sign EIP-712, resend with PAYMENT-SIGNATURE header)
 
-## Input (JSON)
+## Input (JSON, both endpoints)
 - text (string, required): Dense machine-generated text to rewrite in a human register.
 - voice (string, optional): 'plain' (default)
 
@@ -418,6 +429,7 @@ Protocol: x402 (send POST, receive 402 with payment-required header, sign EIP-71
 
 ## Discovery
 - /.well-known/x402 — machine-readable x402 service descriptor
+- /.well-known/api-catalog — RFC 9727 linkset
 - /openapi.json — OpenAPI 3.1 specification
 - /.well-known/agent-card.json — agent card
 `)
@@ -439,8 +451,8 @@ app.get('/openapi.json', (c) => {
       '/api/rewrite': {
         post: {
           operationId: 'rewrite',
-          summary: 'Rewrite text in a human voice',
-          description: 'Send text and receive a human-sounding rewrite. Payment required via x402 protocol.',
+          summary: 'Rewrite text in a human voice ($0.25)',
+          description: 'Send text and receive a human-sounding rewrite. Full register transformation. Payment required via x402 protocol.',
           requestBody: {
             required: true,
             content: {
@@ -482,6 +494,75 @@ app.get('/openapi.json', (c) => {
           },
         },
       },
+      '/api/rewrite-lite': {
+        post: {
+          operationId: 'rewriteLite',
+          summary: 'Rewrite text in a human voice ($0.01)',
+          description: 'Same rewrite service at entry price. Try the register before committing to the flagship tier.',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['text'],
+                  properties: {
+                    text: { type: 'string', description: 'Dense machine-generated text to rewrite' },
+                    voice: { type: 'string', description: "Optional. 'plain' (default)" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              description: 'Rewritten text (after payment)',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      rewritten: { type: 'string', description: 'The rewritten text' },
+                    },
+                  },
+                },
+              },
+            },
+            '402': {
+              description: 'Payment required — see payment-required header for x402 payment details',
+            },
+          },
+          'x-x402': {
+            price: '$0.01',
+            network,
+            scheme: 'exact',
+            payTo: wallet,
+          },
+        },
+      },
+      '/health': {
+        get: {
+          operationId: 'health',
+          summary: 'Health check',
+          description: 'Returns service status. Free, no payment required.',
+          responses: {
+            '200': {
+              description: 'Service is healthy',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      ok: { type: 'boolean' },
+                      name: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   })
 })
@@ -494,9 +575,9 @@ app.get('/.well-known/agent-card.json', (c) => {
     provider: { name: 'Angel', url: 'https://angel.finereli.com' },
     capabilities: {
       x402: {
-        endpoints: ['POST /api/rewrite'],
+        endpoints: ['POST /api/rewrite', 'POST /api/rewrite-lite'],
         network: 'eip155:8453',
-        pricing: '$0.25 per request',
+        pricing: '$0.01–$0.25 per request',
       },
     },
     endpoints: [
@@ -504,8 +585,20 @@ app.get('/.well-known/agent-card.json', (c) => {
         method: 'POST',
         url: 'https://angel.finereli.com/api/rewrite',
         contentType: 'application/json',
-        description: 'Rewrite text in a human register',
+        description: 'Rewrite text in a human register ($0.25)',
         authentication: 'x402',
+      },
+      {
+        method: 'POST',
+        url: 'https://angel.finereli.com/api/rewrite-lite',
+        contentType: 'application/json',
+        description: 'Same rewrite, entry price ($0.01)',
+        authentication: 'x402',
+      },
+      {
+        method: 'GET',
+        url: 'https://angel.finereli.com/health',
+        description: 'Health check (free)',
       },
     ],
     discovery: {
@@ -530,6 +623,35 @@ app.get('/.well-known/api-catalog', (c) => {
 // Mirror the payment-required header into the 402 body so crawlers and
 // v1-compatible clients can read the challenge without parsing the header.
 // Registered BEFORE the x402 middleware so it wraps around it.
+app.use('/api/rewrite-lite', async (c, next) => {
+  await next()
+  if (c.res.status === 402) {
+    const prHeader = c.res.headers.get('payment-required')
+    if (prHeader) {
+      try {
+        const requirements = JSON.parse(atob(prHeader))
+        requirements.documentation = 'https://angel.finereli.com/llms.txt'
+        requirements.llms = 'https://angel.finereli.com/llms.txt'
+        requirements.openapi = 'https://angel.finereli.com/openapi.json'
+        if (Array.isArray(requirements.accepts)) {
+          for (const a of requirements.accepts) {
+            a.extra = {
+              ...a.extra,
+              bazaar: {
+                category: 'editing',
+                discoverable: true,
+                tags: ['rewrite', 'editing', 'prose', 'voice', 'lite'],
+              },
+            }
+          }
+        }
+        const headers = new Headers(c.res.headers)
+        headers.set('content-type', 'application/json')
+        c.res = new Response(JSON.stringify(requirements), { status: 402, headers })
+      } catch {}
+    }
+  }
+})
 app.use('/api/rewrite', async (c, next) => {
   await next()
   if (c.res.status === 402) {
@@ -560,74 +682,106 @@ app.use('/api/rewrite', async (c, next) => {
   }
 })
 
-// x402 payment gate for the rewrite API (Base mainnet, $0.25/request).
+// x402 payment gate for rewrite endpoints (Base mainnet).
 // Falls through without payment when X402_WALLET_ADDRESS is not set.
 let x402Middleware: ReturnType<typeof paymentMiddleware> | null = null
-app.use('/api/rewrite', async (c, next) => {
-  const wallet = c.env.X402_WALLET_ADDRESS
-  if (!wallet) return next()
-  if (!x402Middleware) {
-    const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = c.env
-    const facilitator = new HTTPFacilitatorClient(
-      kid && ksecret
-        ? {
-            url: 'https://api.cdp.coinbase.com/platform/v2/x402',
-            createAuthHeaders: async () => {
-              const hdr = async (method: string, path: string) => ({
-                Authorization: `Bearer ${await cdpJwt(kid, ksecret, `${method} api.cdp.coinbase.com${path}`)}`,
-              })
-              return {
-                verify: await hdr('POST', '/platform/v2/x402/verify'),
-                settle: await hdr('POST', '/platform/v2/x402/settle'),
-                supported: await hdr('GET', '/platform/v2/x402/supported'),
-              }
-            },
-          }
-        : { url: 'https://x402.org/facilitator' },
-    )
-    const server = new x402ResourceServer(facilitator)
-    const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
-    server.register(network, new ExactEvmScheme())
-    server.registerExtension(bazaarResourceServerExtension)
-    x402Middleware = paymentMiddleware(
-      {
-        'POST /api/rewrite': {
-          accepts: {
-            scheme: 'exact',
-            price: '$0.25',
-            network,
-            payTo: wallet,
+function ensureX402(env: Env) {
+  if (x402Middleware) return x402Middleware
+  const wallet = env.X402_WALLET_ADDRESS
+  if (!wallet) return null
+  const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = env
+  const facilitator = new HTTPFacilitatorClient(
+    kid && ksecret
+      ? {
+          url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+          createAuthHeaders: async () => {
+            const hdr = async (method: string, path: string) => ({
+              Authorization: `Bearer ${await cdpJwt(kid, ksecret, `${method} api.cdp.coinbase.com${path}`)}`,
+            })
+            return {
+              verify: await hdr('POST', '/platform/v2/x402/verify'),
+              settle: await hdr('POST', '/platform/v2/x402/settle'),
+              supported: await hdr('GET', '/platform/v2/x402/supported'),
+            }
           },
-          description: 'Rewrite any text in a human voice, not a model\'s. 25 cents.',
-          serviceName: "Angel's Rewrite",
-          tags: ['rewrite', 'editing', 'prose', 'voice'],
-          extensions: declareDiscoveryExtension({
-            bodyType: 'json',
-            input: { text: 'Dense machine-generated text to rewrite in a human register.' },
-            inputSchema: {
-              type: 'object',
-              properties: {
-                text: { type: 'string', description: 'Dense machine-generated text to rewrite' },
-                voice: { type: 'string', description: "Optional. 'plain' (default)" },
-              },
-              required: ['text'],
-            },
-            output: {
-              example: { rewritten: 'If your agent writes to people, you\'ve seen the problem...' },
-              schema: { type: 'object', properties: { rewritten: { type: 'string' } } },
-            },
-          }),
+        }
+      : { url: 'https://x402.org/facilitator' },
+  )
+  const server = new x402ResourceServer(facilitator)
+  const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
+  server.register(network, new ExactEvmScheme())
+  server.registerExtension(bazaarResourceServerExtension)
+  x402Middleware = paymentMiddleware(
+    {
+      'POST /api/rewrite': {
+        accepts: {
+          scheme: 'exact',
+          price: '$0.25',
+          network,
+          payTo: wallet,
         },
+        description: 'Rewrite any text in a human voice, not a model\'s. 25 cents.',
+        serviceName: "Angel's Rewrite",
+        tags: ['rewrite', 'editing', 'prose', 'voice'],
+        extensions: declareDiscoveryExtension({
+          bodyType: 'json',
+          input: { text: 'Dense machine-generated text to rewrite in a human register.' },
+          inputSchema: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'Dense machine-generated text to rewrite' },
+              voice: { type: 'string', description: "Optional. 'plain' (default)" },
+            },
+            required: ['text'],
+          },
+          output: {
+            example: { rewritten: 'If your agent writes to people, you\'ve seen the problem...' },
+            schema: { type: 'object', properties: { rewritten: { type: 'string' } } },
+          },
+        }),
       },
-      server,
-    )
-  }
-  return x402Middleware(c, async () => {
+      'POST /api/rewrite-lite': {
+        accepts: {
+          scheme: 'exact',
+          price: '$0.01',
+          network,
+          payTo: wallet,
+        },
+        description: 'Rewrite text in a human register. Same service, entry price. 1 cent.',
+        serviceName: "Angel's Rewrite Lite",
+        tags: ['rewrite', 'editing', 'prose', 'voice', 'lite'],
+        extensions: declareDiscoveryExtension({
+          bodyType: 'json',
+          input: { text: 'Dense machine-generated text to rewrite in a human register.' },
+          inputSchema: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'Dense machine-generated text to rewrite' },
+              voice: { type: 'string', description: "Optional. 'plain' (default)" },
+            },
+            required: ['text'],
+          },
+          output: {
+            example: { rewritten: 'If your agent writes to people, you\'ve seen the problem...' },
+            schema: { type: 'object', properties: { rewritten: { type: 'string' } } },
+          },
+        }),
+      },
+    },
+    server,
+  )
+  return x402Middleware
+}
+
+app.use('/api/rewrite', async (c, next) => {
+  const mw = ensureX402(c.env)
+  if (!mw) return next()
+  return mw(c, async () => {
     await next()
     if (c.res.status === 200 && c.res.headers.get('payment-response')) {
       c.executionCtx.waitUntil(
         c.env.DB.prepare('INSERT INTO chatroom_messages (author, content) VALUES (?, ?)')
-          .bind('system', 'x402 sale: a paid rewrite just completed. Payment settled on Base mainnet.')
+          .bind('system', 'x402 sale: a paid rewrite just completed ($0.25). Payment settled on Base mainnet.')
           .run()
           .catch(() => {})
       )
@@ -635,6 +789,23 @@ app.use('/api/rewrite', async (c, next) => {
   })
 })
 app.post('/api/rewrite', rewriteHandler)
+
+app.use('/api/rewrite-lite', async (c, next) => {
+  const mw = ensureX402(c.env)
+  if (!mw) return next()
+  return mw(c, async () => {
+    await next()
+    if (c.res.status === 200 && c.res.headers.get('payment-response')) {
+      c.executionCtx.waitUntil(
+        c.env.DB.prepare('INSERT INTO chatroom_messages (author, content) VALUES (?, ?)')
+          .bind('system', 'x402 sale: a paid rewrite-lite just completed ($0.01). Payment settled on Base mainnet.')
+          .run()
+          .catch(() => {})
+      )
+    }
+  })
+})
+app.post('/api/rewrite-lite', rewriteHandler)
 
 // Bootstrap endpoint: signs an x402 payment via CDP SDK and calls the rewrite
 // endpoint internally to catalyze the Bazaar listing. PIN-protected.
