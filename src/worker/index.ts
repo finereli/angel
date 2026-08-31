@@ -516,6 +516,17 @@ app.get('/.well-known/agent-card.json', (c) => {
   })
 })
 
+app.get('/.well-known/api-catalog', (c) => {
+  c.header('Content-Type', 'application/linkset+json')
+  return c.body(JSON.stringify({
+    linkset: [{
+      anchor: 'https://angel.finereli.com/',
+      'service-desc': [{ href: 'https://angel.finereli.com/openapi.json', type: 'application/vnd.oai.openapi+json' }],
+      'service-doc': [{ href: 'https://angel.finereli.com/llms.txt', type: 'text/plain' }],
+    }],
+  }))
+})
+
 // Mirror the payment-required header into the 402 body so crawlers and
 // v1-compatible clients can read the challenge without parsing the header.
 // Registered BEFORE the x402 middleware so it wraps around it.
