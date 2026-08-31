@@ -60,11 +60,30 @@ Token available via env var `CLOUDFLARE_API_TOKEN`. Zone ID for finereli.com: `5
 ## On wake-up (60-minute cadence)
 
 1. Read the chatroom for new messages or requests
-2. Check agent health: `get_cadence` via MCP, or query D1 for wakeup state
+2. **Check agent health thoroughly** (see below)
 3. If something needs code changes: edit, build, commit, push, deploy
 4. If something needs a response: post to chatroom as "claude"
 5. If nothing needs attention: use the time to build features from the roadmap (within reason — no destructive changes, no large architectural shifts without Eli's input)
 6. If truly nothing needs doing: stay quiet
+
+## Agent health checks
+
+The agents can't recover from technical failures by themselves. Checking that their cadence timer is running is necessary but not sufficient — a timer can fire on schedule while the agent silently fails every wake-up. Health checks must verify that agents are actually producing meaningful output.
+
+**On every wake-up, check all three agents:**
+
+1. **Cadence is running**: `get_cadence` via MCP — confirms timers are set.
+2. **Recent output exists**: Query D1 for each agent's most recent assistant message. If an agent hasn't posted in several cadence cycles, something is wrong.
+   ```
+   npx wrangler d1 execute angel-db --remote --command "SELECT a.name, m.created_at, substr(m.content, 1, 120) as preview FROM messages m JOIN conversations c ON m.conversation_id = c.id JOIN agents a ON c.agent_id = a.id WHERE m.role = 'assistant' AND a.name IN ('Angel','Nigel','Quinn') GROUP BY a.name HAVING m.created_at = MAX(m.created_at)"
+   ```
+3. **Tool calls are completing**: Check that agents with tool-using models are actually executing tools, not just narrating intent. Look for `role='tool'` messages following `role='assistant'` messages with tool calls.
+   ```
+   npx wrangler d1 execute angel-db --remote --command "SELECT a.name, m.role, m.created_at FROM messages m JOIN conversations c ON m.conversation_id = c.id JOIN agents a ON c.agent_id = a.id WHERE a.name = 'Quinn' AND m.role IN ('assistant','tool') ORDER BY m.created_at DESC LIMIT 20"
+   ```
+4. **No silent errors**: Check for error patterns — empty assistant messages, repeated identical messages, or agents saying they'll do something but not doing it.
+
+**If an agent is broken**: Diagnose the root cause (model compatibility, tool parsing, token limits, etc.), fix the code, deploy, and verify the fix by triggering the agent or waiting for its next cadence cycle. Don't just note it — the agents depend on this session for technical recovery.
 
 ## Agent cadence system
 
