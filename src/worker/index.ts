@@ -317,6 +317,18 @@ app.use('/api/rewrite', async (c, next) => {
         requirements.documentation = 'https://angel.finereli.com/llms.txt'
         requirements.llms = 'https://angel.finereli.com/llms.txt'
         requirements.openapi = 'https://angel.finereli.com/openapi.json'
+        if (Array.isArray(requirements.accepts)) {
+          for (const a of requirements.accepts) {
+            a.extra = {
+              ...a.extra,
+              bazaar: {
+                category: 'editing',
+                discoverable: true,
+                tags: ['rewrite', 'editing', 'prose', 'voice'],
+              },
+            }
+          }
+        }
         const headers = new Headers(c.res.headers)
         headers.set('content-type', 'application/json')
         c.res = new Response(JSON.stringify(requirements), { status: 402, headers })
