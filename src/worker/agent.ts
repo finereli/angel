@@ -91,7 +91,6 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
   let totalInput = 0
   let totalOutput = 0
   let fullText = '' // all committed rounds' text; this is the saved reply
-  let retried = false
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     let assistantText = ''
@@ -189,21 +188,6 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     const calls = toolCalls.filter(tc => tc && tc.function.name)
 
     if (calls.length === 0) {
-      // Reasoning models sometimes exhaust max_tokens on thinking or say
-      // "let me check" then stop without calling tools. Retry once: append
-      // their text as context and nudge them to actually call a tool.
-      if (thinkModel && round === 0 && !retried) {
-        const stripped = assistantText.trim()
-        const looksLikeIntent = stripped.length < 300 && /\b(let me|check|look|catch up|read)\b/i.test(stripped)
-        if (finishReason === 'length' || looksLikeIntent) {
-          console.error(`[runAgent] reasoning model stalled (finish=${finishReason}, len=${stripped.length}) — retrying with nudge`)
-          retried = true
-          yield { type: 'reset' }
-          messages.push({ role: 'assistant', content: assistantText || '(thinking)' })
-          messages.push({ role: 'user', content: '[system: You have tools available. Call them now instead of describing what you plan to do.]' })
-          continue
-        }
-      }
       if (truncated && (fullText + assistantText).trim()) yield { type: 'text', content: ' …[cut off]' }
       else if (!(fullText + assistantText).trim()) yield { type: 'text', content: '*(the response was cut off before anything came through)*' }
       yield { type: 'done', usage: { input: totalInput, output: totalOutput }, finishReason }

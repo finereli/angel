@@ -23,13 +23,12 @@ export async function chatCompletion(
   opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string } = {}
 ): Promise<{ content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; usage?: { prompt_tokens: number; completion_tokens: number } }> {
   const model = opts.model || getModel(env)
-  const isReasoning = model.toLowerCase().includes('qwen') || model.toLowerCase().includes('qwq')
   const body: Record<string, unknown> = {
     model,
     messages,
     temperature: opts.temperature ?? 0.7,
-    max_tokens: opts.max_tokens ?? (isReasoning ? 16384 : 4096),
   }
+  if (opts.max_tokens) body.max_tokens = opts.max_tokens
   if (opts.tools?.length) { body.tools = opts.tools; body.tool_choice = 'auto' }
 
   const controller = new AbortController()
@@ -56,17 +55,14 @@ export async function* chatCompletionStream(
   opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string } = {}
 ): AsyncGenerator<StreamChunk> {
   const model = opts.model || getModel(env)
-  const isReasoning = model.toLowerCase().includes('qwen') || model.toLowerCase().includes('qwq')
   const body: Record<string, unknown> = {
     model,
     messages,
     temperature: opts.temperature ?? 0.7,
-    // Reasoning models (Qwen, QwQ) spend thinking tokens against this cap.
-    // 32768 gives enough room for thinking + tool calls + reply text.
-    max_tokens: opts.max_tokens ?? (isReasoning ? 32768 : 8192),
     stream: true,
     stream_options: { include_usage: true },
   }
+  if (opts.max_tokens) body.max_tokens = opts.max_tokens
   if (opts.tools?.length) { body.tools = opts.tools; body.tool_choice = 'auto' }
 
   const controller = new AbortController()
