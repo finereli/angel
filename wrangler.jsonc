@@ -5,6 +5,10 @@
   "compatibility_date": "2025-05-01",
   "compatibility_flags": ["nodejs_compat"],
   "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"] }],
+  "alias": {
+    "@x402/svm/exact/client": "./src/worker/stubs/x402-svm.ts",
+    "@x402/svm/exact/v1/client": "./src/worker/stubs/x402-svm.ts"
+  },
   "observability": { "enabled": true },
   "routes": [{ "pattern": "angel.finereli.com", "custom_domain": true }],
   "assets": {
