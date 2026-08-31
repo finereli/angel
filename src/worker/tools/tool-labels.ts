@@ -40,4 +40,6 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   list_proposals: ['Checking proposals', 'Checked proposals'],
   x402_buy: ['Processing x402 payment', 'Processed x402 payment'],
   x402_check: ['Checking x402 endpoint', 'Checked x402 endpoint'],
+  track_service: ['Tracking service', 'Tracked service'],
+  list_services: ['Listing services', 'Listed services'],
 }

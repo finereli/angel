@@ -35,6 +35,70 @@ app.get('/ws', async (c) => {
 // Health check (no auth)
 app.get('/api/health', (c) => c.json({ ok: true, name: 'Angel' }))
 
+// --- Chatroom REST API (PIN auth) ---
+// Simple alternative to MCP — pass PIN in Authorization header or JSON body.
+function pinAuth(c: { env: Env; req: { header: (n: string) => string | undefined }; json: (d: unknown, s?: number) => Response }, body?: { pin?: string }): Response | null {
+  const pin = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') || body?.pin
+  if (!pin || pin !== c.env.PIN) return c.json({ error: 'unauthorized' }, 401) as Response
+  return null
+}
+
+app.post('/api/room/read', async (c) => {
+  const body = await c.req.json<{ pin?: string; since?: string; limit?: number }>().catch(() => ({}))
+  const denied = pinAuth(c, body)
+  if (denied) return denied
+  const since = body.since?.replace('T', ' ').replace('Z', '')
+  const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 200)
+  let rows
+  if (since) {
+    rows = await c.env.DB.prepare(
+      'SELECT id, author, content, created_at FROM chatroom_messages WHERE created_at > ? ORDER BY created_at ASC LIMIT ?'
+    ).bind(since, limit).all()
+  } else {
+    rows = await c.env.DB.prepare(
+      'SELECT id, author, content, created_at FROM chatroom_messages ORDER BY created_at DESC LIMIT ?'
+    ).bind(limit).all()
+    if (rows.results) rows.results.reverse()
+  }
+  return c.json({ messages: rows.results || [] })
+})
+
+app.post('/api/room/post', async (c) => {
+  const body = await c.req.json<{ pin?: string; author?: string; content?: string }>().catch(() => ({}))
+  const denied = pinAuth(c, body)
+  if (denied) return denied
+  const author = (body.author || 'claude').trim()
+  const content = (body.content || '').trim()
+  if (!content) return c.json({ error: 'content is required' }, 400)
+  const result = await c.env.DB.prepare(
+    'INSERT INTO chatroom_messages (author, content) VALUES (?, ?)'
+  ).bind(author, content).run()
+  const doId = c.env.ANGEL_DO.idFromName('angel')
+  const stub = c.env.ANGEL_DO.get(doId)
+  await stub.fetch(new Request('http://do/api/room/post', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ author, content }),
+  })).catch(() => {})
+  return c.json({ ok: true, id: result.meta.last_row_id })
+})
+
+app.post('/api/room/search', async (c) => {
+  const body = await c.req.json<{ pin?: string; query?: string; limit?: number }>().catch(() => ({}))
+  const denied = pinAuth(c, body)
+  if (denied) return denied
+  const query = (body.query || '').trim()
+  if (!query) return c.json({ error: 'query is required' }, 400)
+  const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 100)
+  const pattern = `%${query}%`
+  const rows = await c.env.DB.prepare(
+    'SELECT id, author, content, created_at FROM chatroom_messages WHERE content LIKE ? OR author LIKE ? ORDER BY created_at DESC LIMIT ?'
+  ).bind(pattern, pattern, limit).all()
+  const messages = rows.results || []
+  messages.reverse()
+  return c.json({ messages })
+})
+
 // OAuth 2.1 discovery + endpoints
 app.get('/.well-known/oauth-protected-resource', protectedResourceMetadata)
 app.get('/.well-known/oauth-authorization-server', authServerMetadata)
