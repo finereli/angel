@@ -17,11 +17,6 @@ const headers = (env: Env) => ({
   'X-Title': 'Angel',
 })
 
-export function isReasoningModel(model: string): boolean {
-  const m = model.toLowerCase()
-  return m.includes('qwen') || m.includes('qwq')
-}
-
 export async function chatCompletion(
   env: Env,
   messages: ChatMessage[],
