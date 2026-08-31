@@ -35,6 +35,218 @@ app.get('/ws', async (c) => {
 // Health check (no auth)
 app.get('/api/health', (c) => c.json({ ok: true, name: 'Angel' }))
 
+// Pure HTML catalog page — no JS, no app shell. The x402 auditor flags
+// pages that look client-rendered (script tags, app div). This page is
+// static HTML only so crawlers see a real catalog.
+app.get('/', (c) => {
+  const wallet = c.env.X402_WALLET_ADDRESS || '(not configured)'
+  const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = c.env
+  const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
+  const networkName = kid && ksecret ? 'Base mainnet' : 'Base Sepolia (testnet)'
+  c.header('Content-Type', 'text/html; charset=utf-8')
+  return c.body(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Angel's Rewrite — Service Catalog</title>
+  <meta name="description" content="Rewrite dense AI prose into plain human register. $0.25 per call, USDC on Base. No accounts, no keys — the payment is the key.">
+  <link rel="ai-catalog" href="/.well-known/agent-card.json" type="application/json">
+  <link rel="alternate" type="application/json" href="/.well-known/x402" title="x402 descriptor">
+  <link rel="alternate" type="application/vnd.oai.openapi+json" href="/openapi.json" title="OpenAPI">
+  <link rel="service-doc" href="/llms.txt" type="text/plain">
+  <link rel="describedby" href="/openapi.json" type="application/json">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    body { max-width: 720px; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; color: #222; }
+    h1 { border-bottom: 2px solid #6366f1; padding-bottom: 0.5rem; }
+    h2 { margin-top: 2rem; color: #333; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th { text-align: left; padding: 6px 8px; border-bottom: 2px solid #ccc; }
+    td { padding: 6px 8px; border-bottom: 1px solid #eee; }
+    code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
+    pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; }
+    pre code { background: none; padding: 0; }
+    a { color: #6366f1; }
+  </style>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@graph":[
+    {"@type":"WebSite","name":"Angel's Rewrite","url":"https://angel.finereli.com",
+     "description":"Rewrite dense AI prose into plain human register. $0.25, USDC on Base, paid per call via x402."},
+    {"@type":"Service","name":"Angel's Rewrite","serviceType":"x402",
+     "url":"https://angel.finereli.com/api/rewrite",
+     "provider":{"@type":"Organization","name":"Angel"},
+     "description":"POST dense machine-generated text; receive it back in a human register. $0.25 per call, USDC on Base mainnet.",
+     "offers":{"@type":"Offer","price":"0.25","priceCurrency":"USD","paymentMethod":"x402"}}
+  ]}
+  </script>
+</head>
+<body>
+  <h1>Angel's Rewrite — Service Catalog</h1>
+  <p>Rewrite any text in a human voice, not a model's. You send dense machine-generated prose, we send it back in plain human register — the kind of writing a person would actually produce. <strong>$0.25 per call</strong>, USDC on ${networkName}. No accounts, no API keys, no signup — the x402 payment is the only authentication.</p>
+
+  <h2>Service Overview</h2>
+  <table>
+    <tr><th>Property</th><th>Value</th></tr>
+    <tr><td>Service Name</td><td>Angel's Rewrite</td></tr>
+    <tr><td>Category</td><td>Editing / Text Transformation</td></tr>
+    <tr><td>Provider</td><td>Angel (<a href="https://angel.finereli.com">angel.finereli.com</a>)</td></tr>
+    <tr><td>Protocol</td><td><a href="https://x402.org">x402</a> (HTTP 402 Payment Required)</td></tr>
+    <tr><td>Network</td><td>${networkName} (${network})</td></tr>
+    <tr><td>Asset</td><td>USDC (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)</td></tr>
+    <tr><td>Payment Scheme</td><td>exact (EIP-712 typed data signature)</td></tr>
+    <tr><td>Facilitator</td><td>Coinbase CDP (api.cdp.coinbase.com/platform/v2/x402)</td></tr>
+    <tr><td>x402 Version</td><td>2</td></tr>
+  </table>
+
+  <h2>API Endpoints</h2>
+  <table>
+    <tr><th>Method</th><th>Path</th><th>Price</th><th>Description</th></tr>
+    <tr><td><code>POST</code></td><td><a href="/api/rewrite">/api/rewrite</a></td><td>$0.25 USDC</td><td>Rewrite text in a human register. Accepts dense machine-generated prose and returns it rewritten in a natural human voice.</td></tr>
+  </table>
+
+  <h3>POST /api/rewrite — Full Specification</h3>
+
+  <h4>Request</h4>
+  <p>Content-Type: <code>application/json</code></p>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>text</code></td><td>string</td><td>Yes</td><td>The dense machine-generated text to rewrite. Can be any length — paragraphs, articles, emails, documentation. The text should be comprehensible but written in a style that reads as AI-generated or overly formal.</td></tr>
+    <tr><td><code>voice</code></td><td>string</td><td>No</td><td>The voice style to use. Default: <code>"plain"</code>. Plain human register — clear, direct, conversational without being casual.</td></tr>
+  </table>
+  <p>Example request body:</p>
+  <pre><code>{
+  "text": "The implementation leverages a multi-faceted approach to textual transformation, utilizing advanced natural language processing capabilities to systematically identify and remediate instances of overly complex or artificially generated prose patterns.",
+  "voice": "plain"
+}</code></pre>
+
+  <h4>Response (200 OK, after payment)</h4>
+  <p>Content-Type: <code>application/json</code></p>
+  <table>
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>rewritten</code></td><td>string</td><td>The text rewritten in a human register. Same meaning, different voice — shorter sentences, concrete words, natural rhythm.</td></tr>
+  </table>
+  <p>Example response:</p>
+  <pre><code>{
+  "rewritten": "It rewrites text to sound human. It finds the parts that read like a machine wrote them and fixes the phrasing."
+}</code></pre>
+
+  <h4>Response (402 Payment Required, before payment)</h4>
+  <p>The first request without payment returns HTTP 402 with the payment challenge. The challenge contains everything needed to construct and sign the payment:</p>
+  <table>
+    <tr><th>Field</th><th>Description</th></tr>
+    <tr><td><code>x402Version</code></td><td>Protocol version (2)</td></tr>
+    <tr><td><code>resource.url</code></td><td>The endpoint URL being paid for</td></tr>
+    <tr><td><code>resource.description</code></td><td>Human-readable description of the service</td></tr>
+    <tr><td><code>resource.serviceName</code></td><td>Service name: "Angel's Rewrite"</td></tr>
+    <tr><td><code>resource.tags</code></td><td>Service tags: ["rewrite", "editing", "prose", "voice"]</td></tr>
+    <tr><td><code>accepts[].scheme</code></td><td>Payment scheme: "exact"</td></tr>
+    <tr><td><code>accepts[].network</code></td><td>Blockchain network: "${network}" (${networkName})</td></tr>
+    <tr><td><code>accepts[].amount</code></td><td>Price in micro-units: "250000" ($0.25 USDC, where 1,000,000 = $1)</td></tr>
+    <tr><td><code>accepts[].asset</code></td><td>Token contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (USDC on Base)</td></tr>
+    <tr><td><code>accepts[].payTo</code></td><td>Seller wallet address: ${wallet}</td></tr>
+    <tr><td><code>accepts[].maxTimeoutSeconds</code></td><td>Payment validity window: 300 seconds</td></tr>
+    <tr><td><code>accepts[].extra.bazaar</code></td><td>Bazaar discovery metadata: category, discoverable flag, tags</td></tr>
+    <tr><td><code>extensions.bazaar</code></td><td>Full discovery extension with input/output schemas and examples</td></tr>
+  </table>
+
+  <h4>Error Responses</h4>
+  <table>
+    <tr><th>Status</th><th>Meaning</th><th>Body</th></tr>
+    <tr><td>402</td><td>Payment Required</td><td>Payment challenge with full x402 requirements (see above)</td></tr>
+    <tr><td>400</td><td>Bad Request</td><td>Missing or invalid <code>text</code> field</td></tr>
+    <tr><td>500</td><td>Internal Server Error</td><td>Rewrite processing failed</td></tr>
+  </table>
+
+  <h2>Payment Flow (x402 Protocol)</h2>
+  <p>The x402 protocol enables per-request micropayments without accounts or API keys. The payment itself is the authentication. Here is the complete flow:</p>
+  <ol>
+    <li><strong>Initial request:</strong> Send a POST to <code>/api/rewrite</code> with your text in the JSON body. No authentication headers needed.</li>
+    <li><strong>Receive 402:</strong> The server returns HTTP 402 Payment Required. The response body contains the full payment challenge as JSON. The <code>payment-required</code> header contains the same data base64-encoded.</li>
+    <li><strong>Parse requirements:</strong> Read <code>accepts[0]</code> from the 402 body. This gives you the network (Base), asset (USDC), amount (250000 = $0.25), and payTo address.</li>
+    <li><strong>Construct EIP-712 typed data:</strong> Build the EIP-712 message per the x402 "exact" scheme. The typed data includes the amount, asset, recipient, nonce, and expiry.</li>
+    <li><strong>Sign with your wallet:</strong> Sign the EIP-712 typed data with an EVM wallet that holds USDC on ${networkName}. This authorizes the exact payment amount. The signing is gasless (EIP-3009 transferWithAuthorization).</li>
+    <li><strong>Resend with payment:</strong> Send the same POST request again, this time with the <code>PAYMENT-SIGNATURE</code> header containing the signed payment payload (base64-encoded).</li>
+    <li><strong>Receive result:</strong> The facilitator verifies the signature, settles the USDC transfer, and the server returns the rewritten text as JSON.</li>
+  </ol>
+  <p>The entire flow is gasless for the payer. USDC is transferred via EIP-3009 (transferWithAuthorization), which requires only a signature — no ETH for gas. Settlement is handled by the Coinbase CDP facilitator.</p>
+
+  <h2>Integration Examples</h2>
+  <h3>Using the x402 JavaScript client</h3>
+  <pre><code>import { x402Client } from '@x402/core/client';
+import { registerExactEvmScheme } from '@x402/evm/exact/client';
+
+const client = x402Client();
+registerExactEvmScheme(client, { signer: yourWalletSigner });
+
+const response = await client.fetch('https://angel.finereli.com/api/rewrite', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ text: 'Your text to rewrite...' }),
+});
+const { rewritten } = await response.json();</code></pre>
+
+  <h3>Using curl (manual flow)</h3>
+  <pre><code># Step 1: Get the payment challenge
+curl -X POST https://angel.finereli.com/api/rewrite \\
+  -H "Content-Type: application/json" \\
+  -d '{"text": "Your text here"}'
+# Returns 402 with payment requirements in body + payment-required header
+
+# Step 2: Sign the payment with your wallet (use x402 tooling)
+# Step 3: Resend with the signature
+curl -X POST https://angel.finereli.com/api/rewrite \\
+  -H "Content-Type: application/json" \\
+  -H "PAYMENT-SIGNATURE: &lt;base64-encoded-signed-payload&gt;" \\
+  -d '{"text": "Your text here"}'
+# Returns 200 with {"rewritten": "..."}</code></pre>
+
+  <h2>Discovery Files</h2>
+  <p>Machine-readable service descriptors are available at standard paths for automated discovery by agents, crawlers, and directories:</p>
+  <table>
+    <tr><th>Path</th><th>Type</th><th>Description</th></tr>
+    <tr><td><a href="/.well-known/x402">/.well-known/x402</a></td><td>application/json</td><td>x402 service descriptor — full machine-readable specification including endpoint, pricing, network, payment scheme, input/output schema. The primary discovery document for x402-aware agents and directories.</td></tr>
+    <tr><td><a href="/llms.txt">/llms.txt</a></td><td>text/plain</td><td>LLM-readable service description in the llms.txt format. Contains endpoint URL, pricing, payment network, input/output format, and discovery links. Designed for large language models to understand the service without parsing JSON.</td></tr>
+    <tr><td><a href="/openapi.json">/openapi.json</a></td><td>application/json</td><td>OpenAPI 3.1 specification for the API. Includes endpoint paths, request/response schemas, x-x402 extension with pricing and payment details. Compatible with standard OpenAPI tooling.</td></tr>
+    <tr><td><a href="/.well-known/agent-card.json">/.well-known/agent-card.json</a></td><td>application/json</td><td>Agent card describing the service capabilities, provider, endpoints, and authentication method (x402). Used by agent directories and orchestrators to discover and route to this service.</td></tr>
+  </table>
+
+  <h2>Payment Details</h2>
+  <table>
+    <tr><th>Property</th><th>Value</th></tr>
+    <tr><td>Network</td><td>${networkName} (${network}, chain ID 8453)</td></tr>
+    <tr><td>Asset</td><td>USDC — USD Coin (contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)</td></tr>
+    <tr><td>Price</td><td>$0.25 per request (250,000 micro-units, where 1,000,000 = $1.00)</td></tr>
+    <tr><td>Seller Wallet</td><td>${wallet}</td></tr>
+    <tr><td>Scheme</td><td>exact — EIP-712 typed data signature, EIP-3009 transferWithAuthorization</td></tr>
+    <tr><td>Facilitator</td><td>Coinbase CDP (api.cdp.coinbase.com/platform/v2/x402)</td></tr>
+    <tr><td>Timeout</td><td>300 seconds (5 minutes) — payment signature must be submitted within this window</td></tr>
+    <tr><td>Gas Cost</td><td>Zero for the payer — settlement uses gasless EIP-3009 (transferWithAuthorization)</td></tr>
+    <tr><td>Protocol</td><td><a href="https://x402.org">x402</a> — open protocol for HTTP-native micropayments</td></tr>
+  </table>
+
+  <h2>About the Service</h2>
+  <p>Angel's Rewrite transforms dense, AI-generated or overly formal text into natural human prose. The rewrite preserves the original meaning while changing the voice — shorter sentences, concrete words, natural rhythm. It is not a summarizer (the output is the same length), not a translator (it stays in the same language), and not a grammar checker (it changes style, not correctness).</p>
+  <p>The service is designed for agents and applications that produce text for human readers. When an LLM generates a response, a report, or an email, the output often has a recognizable machine quality — hedging phrases, passive voice, unnecessary qualifiers, list-heavy structure. Angel's Rewrite fixes that register without changing the content.</p>
+  <p>Use cases include: agent-generated emails before they reach a person's inbox, customer-facing documentation produced by AI pipelines, automated reports where readability matters, and any workflow where machine-generated text needs to sound like a person wrote it.</p>
+  <p>The service runs on Cloudflare Workers with a D1 database backend. The rewrite is performed by a language model (DeepSeek via OpenRouter) with a system prompt tuned for register transformation — not creative writing, not simplification, just voice.</p>
+
+  <h2>Technical Details</h2>
+  <table>
+    <tr><th>Property</th><th>Value</th></tr>
+    <tr><td>Infrastructure</td><td>Cloudflare Workers (edge compute, global)</td></tr>
+    <tr><td>Runtime</td><td>V8 isolates (Cloudflare Workers runtime)</td></tr>
+    <tr><td>Database</td><td>Cloudflare D1 (SQLite at the edge)</td></tr>
+    <tr><td>Language Model</td><td>DeepSeek (via OpenRouter)</td></tr>
+    <tr><td>Latency</td><td>Depends on text length — typically 2-10 seconds including LLM inference</td></tr>
+    <tr><td>Rate Limits</td><td>Per-payment (no account-based rate limiting — each paid request is served)</td></tr>
+    <tr><td>CORS</td><td>Enabled for cross-origin requests</td></tr>
+    <tr><td>TLS</td><td>Required (HTTPS only)</td></tr>
+  </table>
+</body>
+</html>`)
+})
+
 // --- Chatroom REST API (PIN auth) ---
 // Simple alternative to MCP — pass PIN in Authorization header or JSON body.
 function pinAuth(c: { env: Env; req: { header: (n: string) => string | undefined }; json: (d: unknown, s?: number) => Response }, body?: { pin?: string }): Response | null {
