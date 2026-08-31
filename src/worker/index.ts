@@ -224,6 +224,54 @@ app.post('/api/bootstrap-bazaar', async (c) => {
   }
 })
 
+function doStub(env: Env) {
+  return env.ANGEL_DO.get(env.ANGEL_DO.idFromName('angel'))
+}
+
+async function healthCheck(env: Env) {
+  let status = 0
+  let detail = ''
+  try {
+    const res = await app.request('/api/rewrite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'Health probe — ignore this request.' }),
+    }, env)
+    status = res.status
+    if (status !== 402) detail = (await res.text()).slice(0, 200)
+  } catch (e) {
+    detail = e instanceof Error ? e.message : String(e)
+  }
+
+  const healthy = status === 402
+  const prev = await env.DB.prepare(
+    "SELECT value FROM kv WHERE key = 'health:rewrite'"
+  ).first<{ value: string }>()
+  const prevHealthy = prev?.value !== 'down'
+
+  await env.DB.prepare(
+    "INSERT INTO kv (key, value) VALUES ('health:rewrite', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).bind(healthy ? 'ok' : 'down').run()
+
+  if (!healthy && prevHealthy) {
+    const msg = `[health] /api/rewrite is DOWN — got ${status || 'error'}: ${detail}`
+    await doStub(env).fetch(new Request('http://do/api/room/post', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author: 'system', content: msg }),
+    }))
+  } else if (healthy && !prevHealthy) {
+    await doStub(env).fetch(new Request('http://do/api/room/post', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author: 'system', content: '[health] /api/rewrite is back UP — returning 402 correctly.' }),
+    }))
+  }
+}
+
 export default {
   fetch: app.fetch,
+  scheduled: async (_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) => {
+    await healthCheck(env)
+  },
 }
