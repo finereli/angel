@@ -50,23 +50,66 @@ app.post('/api/order', orderHandler)
 app.get('/respond/:slug', respondPage)
 app.post('/api/respond/:slug', respondHandler)
 
-// x402 payment gate for the rewrite API (Base Sepolia, $0.25/request).
+// CDP JWT auth for the Coinbase x402 facilitator (Ed25519 / EdDSA)
+function toBase64Url(buf: Uint8Array): string {
+  let s = ''
+  for (const b of buf) s += String.fromCharCode(b)
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+async function cdpJwt(keyId: string, secret: string, uri: string): Promise<string> {
+  const raw = Uint8Array.from(atob(secret), c => c.charCodeAt(0))
+  const key = await crypto.subtle.importKey(
+    'jwk',
+    { kty: 'OKP', crv: 'Ed25519', d: toBase64Url(raw.slice(0, 32)), x: toBase64Url(raw.slice(32)) },
+    { name: 'Ed25519' },
+    false,
+    ['sign'],
+  )
+  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('')
+  const now = Math.floor(Date.now() / 1000)
+  const enc = (o: unknown) => btoa(JSON.stringify(o)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const h = enc({ alg: 'EdDSA', typ: 'JWT', kid: keyId, nonce })
+  const p = enc({ sub: keyId, iss: 'cdp', aud: ['cdp_service'], nbf: now, exp: now + 120, uris: [uri] })
+  const sig = toBase64Url(new Uint8Array(await crypto.subtle.sign('Ed25519', key, new TextEncoder().encode(`${h}.${p}`))))
+  return `${h}.${p}.${sig}`
+}
+
+// x402 payment gate for the rewrite API (Base mainnet, $0.25/request).
 // Falls through without payment when X402_WALLET_ADDRESS is not set.
 let x402Middleware: ReturnType<typeof paymentMiddleware> | null = null
 app.use('/api/rewrite', async (c, next) => {
   const wallet = c.env.X402_WALLET_ADDRESS
   if (!wallet) return next()
   if (!x402Middleware) {
-    const facilitator = new HTTPFacilitatorClient({ url: 'https://x402.org/facilitator' })
+    const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = c.env
+    const facilitator = new HTTPFacilitatorClient(
+      kid && ksecret
+        ? {
+            url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+            createAuthHeaders: async () => {
+              const hdr = async (method: string, path: string) => ({
+                Authorization: `Bearer ${await cdpJwt(kid, ksecret, `${method} api.cdp.coinbase.com${path}`)}`,
+              })
+              return {
+                verify: await hdr('POST', '/platform/v2/x402/verify'),
+                settle: await hdr('POST', '/platform/v2/x402/settle'),
+                supported: await hdr('GET', '/platform/v2/x402/supported'),
+              }
+            },
+          }
+        : { url: 'https://x402.org/facilitator' },
+    )
     const server = new x402ResourceServer(facilitator)
-    server.register('eip155:84532', new ExactEvmScheme())
+    const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
+    server.register(network, new ExactEvmScheme())
     x402Middleware = paymentMiddleware(
       {
         'POST /api/rewrite': {
           accepts: {
             scheme: 'exact',
             price: '$0.25',
-            network: 'eip155:84532',
+            network,
             payTo: wallet,
           },
           description: 'Rewrite machine-generated text in a human register',

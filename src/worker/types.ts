@@ -8,6 +8,8 @@ export interface Env {
   DEEPSEEK_MODEL?: string
   RESEND_API_KEY?: string
   X402_WALLET_ADDRESS?: string
+  CDP_API_KEY_ID?: string
+  CDP_API_KEY_SECRET?: string
 }
 
 // DB row types
