@@ -12,6 +12,7 @@ import { codeTools } from './code'
 import { deliveryTools } from './delivery'
 import { randomTools } from './random'
 import { agentTools } from './agents'
+import { x402Tools } from './x402'
 
 export interface ToolContext {
   env: Env
@@ -39,6 +40,7 @@ const ALL_TOOLS: Tool[] = [
   ...deliveryTools,
   ...randomTools,
   ...agentTools,
+  ...x402Tools,
 ]
 
 const byName = new Map(ALL_TOOLS.map(t => [t.def.function.name, t]))

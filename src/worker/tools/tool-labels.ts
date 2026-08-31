@@ -38,4 +38,6 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   propose_agent: ['Proposing agent', 'Proposed agent'],
   approve_agent: ['Approving agent', 'Approved agent'],
   list_proposals: ['Checking proposals', 'Checked proposals'],
+  x402_buy: ['Processing x402 payment', 'Processed x402 payment'],
+  x402_check: ['Checking x402 endpoint', 'Checked x402 endpoint'],
 }
