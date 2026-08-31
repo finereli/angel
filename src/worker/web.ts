@@ -37,7 +37,7 @@ export async function fetchPage(url: string): Promise<string> {
   const ct = resp.headers.get('content-type') || ''
   const body = await resp.text()
 
-  if (ct.includes('text/plain') || ct.includes('text/markdown')) {
+  if (ct.includes('text/plain') || ct.includes('text/markdown') || ct.includes('application/json')) {
     return truncate(body)
   }
 

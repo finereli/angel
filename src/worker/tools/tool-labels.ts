@@ -6,6 +6,7 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   list_tags: ['Reviewing tags', 'Reviewed tags'],
   memory_stats: ['Checking memory', 'Checked memory'],
   web_fetch: ['Reading web page', 'Read web page'],
+  web_post: ['Sending request', 'Sent request'],
   lists_catalog: ['Checking lists', 'Checked lists'],
   list_create: ['Creating list', 'Created list'],
   list_read: ['Reading list', 'Read list'],

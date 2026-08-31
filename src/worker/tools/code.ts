@@ -137,6 +137,7 @@ async function executeCode(code: string): Promise<string> {
       const err = vm.dump(result.error)
       result.error.dispose()
       const errMsg = typeof err === 'object' && err?.message ? err.message : String(err)
+      console.error(`[run_code] error: ${errMsg}\n--- code ---\n${code.slice(0, 500)}\n---`)
       const text = (output ? output + '\n' : '') + 'Error: ' + errMsg
       return text.slice(0, MAX_OUTPUT)
     }
@@ -163,7 +164,7 @@ export const codeTools: Tool[] = [
       type: 'function',
       function: {
         name: 'run_code',
-        description: 'Run JavaScript code in a sandbox. Network access via __fetch(url, {method, headers, body}) which returns {ok, status, body, headers}. Use console.log() for output, or return a value from the last expression. 10-second timeout, 10MB memory limit.',
+        description: 'Run JavaScript code in a QuickJS sandbox (ES2020). Network access via __fetch(url, opts) — this is SYNCHRONOUS, do NOT use await or async. Call it directly: var res = __fetch("https://example.com/api", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({key: "value"})}); console.log(res.status, res.body); — res has {ok, status, body, headers}. No top-level await. No import/export. Use console.log() for output. 10s timeout, 10MB memory limit.',
         parameters: {
           type: 'object',
           properties: {
