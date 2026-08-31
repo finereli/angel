@@ -1,5 +1,5 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
-import { chatCompletionStream, getModel } from './llm'
+import { chatCompletionStream, getModel, isReasoningModel } from './llm'
 import { getToolDefinitions, executeTool, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble, buildPerMessageReminder } from './lists'
@@ -15,9 +15,8 @@ function isDeepSeek(env: Env, agentModel?: string | null): boolean {
   return getModel(env, agentModel).toLowerCase().includes('deepseek')
 }
 
-function isReasoningModel(env: Env, agentModel?: string | null): boolean {
-  const m = getModel(env, agentModel).toLowerCase()
-  return m.includes('qwen') || m.includes('qwq')
+function isReasoningAgent(env: Env, agentModel?: string | null): boolean {
+  return isReasoningModel(getModel(env, agentModel))
 }
 
 function stripThinkTags(text: string): string {
@@ -72,7 +71,10 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
   const { env, conversationId, agentId, agentName, agentModel } = ctx
   const modelId = getModel(env, agentModel)
 
-  const system = await buildSystemPrompt(env, agentId, agentName)
+  let system = await buildSystemPrompt(env, agentId, agentName)
+  if (isReasoningAgent(env, agentModel)) {
+    system += '\n\nThink step by step before acting. Briefly state what you know, what you need to find out, and what tool to call — then call it. Do not describe tool calls without making them.'
+  }
   const { tiles, verbatim, total } = await renderStreamContext(env, agentId, conversationId)
   // The current message is already saved; drop it from the verbatim tail and append it live.
   const history = verbatim.filter(p => p.idx !== total - 1)
@@ -100,7 +102,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     let finishReason: string | null = null
     const announced = new Set<string>() // tool ids already shown to the client
     const dsmlFilter = isDeepSeek(env, agentModel) ? new DsmlStreamFilter() : null
-    const thinkModel = isReasoningModel(env, agentModel)
+    const thinkModel = isReasoningAgent(env, agentModel)
 
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
     // telling the client to discard the truncated partial first. The provider's
@@ -282,7 +284,7 @@ export async function runMemoryPass(ctx: AgentContext): Promise<void> {
         console.error(`[runMemoryPass] recovered ${parsed.toolCalls.length} tool call(s) from DeepSeek DSML text`)
       }
     }
-    if (isReasoningModel(env, agentModel)) text = stripThinkTags(text)
+    if (isReasoningAgent(env, agentModel)) text = stripThinkTags(text)
     const valid = toolCalls.filter(tc => tc && tc.function.name && isParseableArgs(tc.function.arguments))
     if (valid.length === 0) return
 
