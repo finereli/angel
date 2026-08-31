@@ -151,41 +151,42 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 
 ## x402 payment system
 
-Angel sells a rewrite service at `POST /api/rewrite` ($0.25/request, USDC on Base mainnet). The x402 middleware returns 402 with payment requirements; clients sign EIP-712 typed data and send the payment in a `PAYMENT-SIGNATURE` header.
+Angel sells a rewrite service at `POST /api/rewrite` ($0.25/request, USDC on Base mainnet). The x402 middleware returns 402 with payment requirements; clients sign EIP-712 typed data and send the payment in a `PAYMENT-SIGNATURE` header. Paid rewrites post a system message to the chatroom.
+
+Full setup guide, troubleshooting, and history: **`docs/x402-setup-guide.md`**
 
 ### Secrets (Cloudflare Worker secrets)
 
-| Secret | What it is | How to set |
+| Secret | What it is | Where from |
 |--------|-----------|------------|
-| `X402_WALLET_ADDRESS` | Seller wallet — receives USDC payments | `npx wrangler secret put X402_WALLET_ADDRESS` |
-| `CDP_API_KEY_ID` | CDP API key ID (Ed25519) | `npx wrangler secret put CDP_API_KEY_ID` |
-| `CDP_API_KEY_SECRET` | CDP API key secret (base64, 64 bytes) | `npx wrangler secret put CDP_API_KEY_SECRET` |
-| `CDP_WALLET_SECRET` | CDP wallet auth secret (base64 DER PKCS8 EC/P-256 key) | `npx wrangler secret put CDP_WALLET_SECRET` |
+| `X402_WALLET_ADDRESS` | Seller wallet — receives USDC | Any EVM address you control. Currently `0x5163...BA06` |
+| `CDP_API_KEY_ID` | CDP API key ID (Ed25519) | CDP Portal → API Keys. Currently `16d09033-...` ("teenagents") |
+| `CDP_API_KEY_SECRET` | CDP API key secret (base64, 64 bytes) | Shown once when creating the API key |
+| `CDP_WALLET_SECRET` | CDP wallet auth secret (P-256) | CDP Portal → Settings → Wallet Secret |
 
-### CDP credentials
+Set each with `npx wrangler secret put <NAME>`.
 
-Two JWT types authenticate with CDP:
-1. **API key JWT** (EdDSA/Ed25519): Signs with `CDP_API_KEY_SECRET`. Used in `Authorization: Bearer <jwt>` header. Function: `cdpJwt()` in `index.ts`.
-2. **Wallet auth JWT** (ES256/P-256): Signs with `CDP_WALLET_SECRET`. Used in `X-Wallet-Auth: <jwt>` header. Required for wallet write/sign operations. Function: `cdpWalletJwt()` in `index.ts`.
+### CDP SDK
 
-Both are generated in-worker using WebCrypto (no external JWT library needed in CF Workers).
+The bootstrap endpoint uses `@coinbase/cdp-sdk` (`CdpClient`) which handles all JWT auth (Ed25519 API key + P-256 wallet auth) internally. Works in CF Workers with `nodejs_compat`. The `cdpJwt()` function in `index.ts` is still used separately for the facilitator middleware's auth headers.
+
+The Solana stubs in `wrangler.jsonc` (`@x402/svm/exact/client` → `src/worker/stubs/x402-svm.ts`) prevent build failures from CDP SDK's dynamic Solana imports.
 
 ### CDP buyer wallet
 
-The bootstrap endpoint auto-discovers (or creates) an EVM account on the CDP key. Current buyer address: `0xa991E0e7b3277bad37290dAd772945B21918D31D`. This wallet needs USDC on Base mainnet to make payments. The x402 EIP-3009 flow is gasless for the payer (facilitator submits the on-chain tx), so no ETH needed.
+Auto-created by `cdp.evm.getOrCreateAccount({ name: 'angel-buyer' })`. Address: `0xa991E0e7b3277bad37290dAd772945B21918D31D`. This is a server-managed key held by CDP — not visible in normal wallet apps. Needs USDC on **Base mainnet** (not Ethereum). The EIP-3009 flow is gasless for the payer.
+
+### Funding the buyer wallet
+
+From Wealthsimple or similar: send USDC/ETH to your Base app wallet (arrives on Ethereum) → bridge both to Base network in the Base app → send USDC on Base to the buyer address. Critical: always verify the send is on the **Base** network, not Ethereum. The address is the same on both networks.
 
 ### Bootstrap endpoint
 
-`POST /api/bootstrap-bazaar` — PIN-protected. Signs an x402 payment via CDP and calls the rewrite endpoint internally to catalyze the Bazaar directory listing. Flow:
-1. Probe `/api/rewrite` internally → get 402 + payment requirements
-2. Look up (or create) CDP EVM account
-3. Sign EIP-712 typed data via CDP's `/v2/evm/accounts/{addr}/sign/typed-data`
-4. Build payment payload using `x402Client` + `registerExactEvmScheme`
-5. Call `/api/rewrite` with `PAYMENT-SIGNATURE` header → get rewrite back
+`POST /api/bootstrap-bazaar` with `{"pin":"..."}`. Uses CDP SDK + x402 client to sign and submit a $0.25 payment internally. Catalyzes the Bazaar directory listing. Re-run within 30 days to maintain the listing.
 
 ### Bazaar listing
 
-The service is declared with the Bazaar discovery extension in the x402 middleware config. Listing happens automatically after the first paid settlement. The Bazaar directory has a 30-day settlement clock — a listed service that goes 30 days without a settlement drops out.
+Listed on [agentic.market](https://agentic.market) after the first paid settlement. 30-day settlement clock — drops out without a settlement. First settlement: 2026-08-31, tx `0x403415dd...03df665`.
 
 ## Key conventions
 

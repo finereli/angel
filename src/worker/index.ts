@@ -141,7 +141,15 @@ app.use('/api/rewrite', async (c, next) => {
       server,
     )
   }
-  return x402Middleware(c, next)
+  await x402Middleware(c, next)
+  if (c.res.status === 200 && c.res.headers.get('payment-response')) {
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare('INSERT INTO chatroom_messages (author, content) VALUES (?, ?)')
+        .bind('system', 'x402 sale: a paid rewrite just completed. Payment settled on Base mainnet.')
+        .run()
+        .catch(() => {})
+    )
+  }
 })
 app.post('/api/rewrite', rewriteHandler)
 
