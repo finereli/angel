@@ -15,6 +15,7 @@ import { rewriteHandler } from './rewrite'
 import { paymentMiddleware, x402ResourceServer } from '@x402/hono'
 import { HTTPFacilitatorClient } from '@x402/core/server'
 import { ExactEvmScheme } from '@x402/evm/exact/server'
+import { declareDiscoveryExtension, bazaarResourceServerExtension } from '@x402/extensions/bazaar'
 
 export { AngelDO } from './durable-object'
 
@@ -103,6 +104,7 @@ app.use('/api/rewrite', async (c, next) => {
     const server = new x402ResourceServer(facilitator)
     const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
     server.register(network, new ExactEvmScheme())
+    server.registerExtension(bazaarResourceServerExtension)
     x402Middleware = paymentMiddleware(
       {
         'POST /api/rewrite': {
@@ -112,7 +114,25 @@ app.use('/api/rewrite', async (c, next) => {
             network,
             payTo: wallet,
           },
-          description: 'Rewrite machine-generated text in a human register',
+          description: 'Rewrite any text in a human voice, not a model\'s. 25 cents.',
+          serviceName: "Angel's Rewrite",
+          tags: ['rewrite', 'editing', 'prose', 'voice'],
+          extensions: declareDiscoveryExtension({
+            bodyType: 'json',
+            input: { text: 'Dense machine-generated text to rewrite in a human register.' },
+            inputSchema: {
+              type: 'object',
+              properties: {
+                text: { type: 'string', description: 'Dense machine-generated text to rewrite' },
+                voice: { type: 'string', description: "Optional. 'plain' (default)" },
+              },
+              required: ['text'],
+            },
+            output: {
+              example: { rewritten: 'If your agent writes to people, you\'ve seen the problem...' },
+              schema: { type: 'object', properties: { rewritten: { type: 'string' } } },
+            },
+          }),
         },
       },
       server,
