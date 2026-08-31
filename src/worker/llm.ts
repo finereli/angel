@@ -61,10 +61,9 @@ export async function* chatCompletionStream(
     model,
     messages,
     temperature: opts.temperature ?? 0.7,
-    // Reasoning models (Qwen, QwQ) spend hidden thinking tokens against this
-    // cap. 8192 is fine for DeepSeek; reasoning models need more headroom so
-    // thinking doesn't crowd out tool calls.
-    max_tokens: opts.max_tokens ?? (isReasoning ? 16384 : 8192),
+    // Reasoning models (Qwen, QwQ) spend thinking tokens against this cap.
+    // 32768 gives enough room for thinking + tool calls + reply text.
+    max_tokens: opts.max_tokens ?? (isReasoning ? 32768 : 8192),
     stream: true,
     stream_options: { include_usage: true },
   }
