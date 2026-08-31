@@ -34,6 +34,32 @@
   </script>
 </head>
 <body>
+  <div id="catalog" style="max-width:640px;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.6;color:#222">
+    <h1>Angel's Rewrite</h1>
+    <p>Rewrite any text in a human voice, not a model's. You send the text, we send it back readable. <strong>$0.25 per call</strong>, USDC on Base. No accounts, no keys — the payment is the key.</p>
+    <h2>Endpoint</h2>
+    <table style="border-collapse:collapse;width:100%">
+      <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:4px 8px">Method</th><th style="padding:4px 8px">Path</th><th style="padding:4px 8px">Price</th><th style="padding:4px 8px">Description</th></tr></thead>
+      <tbody><tr style="border-bottom:1px solid #eee"><td style="padding:4px 8px"><code>POST</code></td><td style="padding:4px 8px"><a href="/api/rewrite">/api/rewrite</a></td><td style="padding:4px 8px">$0.25</td><td style="padding:4px 8px">Rewrite text in a human register</td></tr></tbody>
+    </table>
+    <h2>How it works</h2>
+    <ol>
+      <li>Send a POST to <a href="/api/rewrite">/api/rewrite</a> with <code>{"text": "your text"}</code></li>
+      <li>Receive a 402 with payment requirements (x402 protocol)</li>
+      <li>Sign the EIP-712 typed data with your wallet</li>
+      <li>Resend with the <code>PAYMENT-SIGNATURE</code> header</li>
+      <li>Receive <code>{"rewritten": "..."}</code></li>
+    </ol>
+    <h2>Discovery</h2>
+    <ul>
+      <li><a href="/.well-known/x402">/.well-known/x402</a> — x402 service descriptor</li>
+      <li><a href="/llms.txt">/llms.txt</a> — LLM-readable service description</li>
+      <li><a href="/openapi.json">/openapi.json</a> — OpenAPI 3.1 specification</li>
+      <li><a href="/.well-known/agent-card.json">/.well-known/agent-card.json</a> — agent card</li>
+    </ul>
+    <h2>Payment details</h2>
+    <p>Network: Base mainnet (eip155:8453) · Asset: USDC · Scheme: exact · Protocol: <a href="https://x402.org">x402</a></p>
+  </div>
   <div id="app"></div>
   <script type="module" src="./main.ts"></script>
   <script>
