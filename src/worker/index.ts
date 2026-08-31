@@ -189,9 +189,34 @@ app.post('/api/bootstrap-bazaar', async (c) => {
   if (!kid || !ksecret) return c.json({ error: 'CDP keys not configured' }, 500)
   if (!wsecret) return c.json({ error: 'CDP_WALLET_SECRET not configured — set it in CF worker secrets' }, 500)
 
-  const buyerAddr = '0xc6735a16b2be223d995a6e330cf8c87fd33a2741' as `0x${string}`
-
   try {
+    // Discover the buyer address from CDP
+    const listPath = '/platform/v2/evm/accounts'
+    const listJwt = await cdpJwt(kid, ksecret, `GET api.cdp.coinbase.com${listPath}`)
+    const listRes = await fetch(`https://api.cdp.coinbase.com${listPath}`, {
+      headers: { 'Authorization': `Bearer ${listJwt}` },
+    })
+    const listBody = await listRes.json<{ accounts?: Array<{ address: string; name?: string }> }>()
+    let buyerAddr: `0x${string}`
+    if (listBody.accounts?.length) {
+      buyerAddr = listBody.accounts[0].address as `0x${string}`
+    } else {
+      // Create an EVM account
+      const createPath = '/platform/v2/evm/accounts'
+      const createBody_ = { name: 'angel-buyer' }
+      const createJwt = await cdpJwt(kid, ksecret, `POST api.cdp.coinbase.com${createPath}`)
+      const createWalletJwt = await cdpWalletJwt(wsecret, 'POST', createPath, createBody_)
+      const createRes = await fetch(`https://api.cdp.coinbase.com${createPath}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${createJwt}`, 'X-Wallet-Auth': createWalletJwt, 'Content-Type': 'application/json' },
+        body: JSON.stringify(createBody_),
+      })
+      const createBody = await createRes.json<{ address?: string; error?: string }>()
+      if (!createRes.ok || !createBody.address) {
+        return c.json({ error: 'No EVM accounts and could not create one', cdpResponse: createBody, status: createRes.status }, 500)
+      }
+      buyerAddr = createBody.address as `0x${string}`
+    }
     // Step 1: Hit the rewrite endpoint internally to get the 402 response
     const probeRes = await app.request('/api/rewrite', {
       method: 'POST',
@@ -272,6 +297,9 @@ app.post('/api/bootstrap-bazaar', async (c) => {
     return c.json({
       ok: paidRes.ok,
       status: paidRes.status,
+      buyerAddr,
+      paymentVersion: paymentPayload.x402Version,
+      headerUsed: headerName,
       paymentResponse: paidRes.headers.get('payment-response'),
       body: paidBody,
     })

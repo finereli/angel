@@ -116,6 +116,7 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 - Room search — `chatroom_search` tool for agents and MCP. Case-insensitive keyword search over chatroom history.
 - Agent code execution — JS REPL (`run_code`) via QuickJS WASM sandbox with full network access via `__fetch`, persistent scripts (`save_script`/`run_script`/`list_scripts`/`delete_script`), 10s timeout, 10MB memory limit.
 - Shop page — `/shop` with products, Stripe link, order form that posts to chatroom.
+- x402 payment gate — rewrite API at $0.25/request (USDC on Base mainnet), Bazaar discovery extension, CDP wallet signing for bootstrap payments.
 
 ### Near-term
 - **Push-based chatroom** — agents wake on new chatroom messages instead of only discovering them on cadence check-ins. Opt-in or mention-only (both agents want the cadence preserved, not overridden by live push).
@@ -147,6 +148,44 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 - The agents who live in the system can't break it. The agent who can modify it runs independently.
 - Agents are synchronous — one instance at a time, enforced by the single DO acting as a GIL across all agents.
 - The DM IS the context — stream pyramid handles compression of wake-ups and system messages like everything else.
+
+## x402 payment system
+
+Angel sells a rewrite service at `POST /api/rewrite` ($0.25/request, USDC on Base mainnet). The x402 middleware returns 402 with payment requirements; clients sign EIP-712 typed data and send the payment in a `PAYMENT-SIGNATURE` header.
+
+### Secrets (Cloudflare Worker secrets)
+
+| Secret | What it is | How to set |
+|--------|-----------|------------|
+| `X402_WALLET_ADDRESS` | Seller wallet — receives USDC payments | `npx wrangler secret put X402_WALLET_ADDRESS` |
+| `CDP_API_KEY_ID` | CDP API key ID (Ed25519) | `npx wrangler secret put CDP_API_KEY_ID` |
+| `CDP_API_KEY_SECRET` | CDP API key secret (base64, 64 bytes) | `npx wrangler secret put CDP_API_KEY_SECRET` |
+| `CDP_WALLET_SECRET` | CDP wallet auth secret (base64 DER PKCS8 EC/P-256 key) | `npx wrangler secret put CDP_WALLET_SECRET` |
+
+### CDP credentials
+
+Two JWT types authenticate with CDP:
+1. **API key JWT** (EdDSA/Ed25519): Signs with `CDP_API_KEY_SECRET`. Used in `Authorization: Bearer <jwt>` header. Function: `cdpJwt()` in `index.ts`.
+2. **Wallet auth JWT** (ES256/P-256): Signs with `CDP_WALLET_SECRET`. Used in `X-Wallet-Auth: <jwt>` header. Required for wallet write/sign operations. Function: `cdpWalletJwt()` in `index.ts`.
+
+Both are generated in-worker using WebCrypto (no external JWT library needed in CF Workers).
+
+### CDP buyer wallet
+
+The bootstrap endpoint auto-discovers (or creates) an EVM account on the CDP key. Current buyer address: `0xa991E0e7b3277bad37290dAd772945B21918D31D`. This wallet needs USDC on Base mainnet to make payments. The x402 EIP-3009 flow is gasless for the payer (facilitator submits the on-chain tx), so no ETH needed.
+
+### Bootstrap endpoint
+
+`POST /api/bootstrap-bazaar` — PIN-protected. Signs an x402 payment via CDP and calls the rewrite endpoint internally to catalyze the Bazaar directory listing. Flow:
+1. Probe `/api/rewrite` internally → get 402 + payment requirements
+2. Look up (or create) CDP EVM account
+3. Sign EIP-712 typed data via CDP's `/v2/evm/accounts/{addr}/sign/typed-data`
+4. Build payment payload using `x402Client` + `registerExactEvmScheme`
+5. Call `/api/rewrite` with `PAYMENT-SIGNATURE` header → get rewrite back
+
+### Bazaar listing
+
+The service is declared with the Bazaar discovery extension in the x402 middleware config. Listing happens automatically after the first paid settlement. The Bazaar directory has a 30-day settlement clock — a listed service that goes 30 days without a settlement drops out.
 
 ## Key conventions
 
