@@ -34,7 +34,6 @@ export async function chatCompletion(
     temperature: opts.temperature ?? 0.7,
   }
   if (opts.max_tokens) body.max_tokens = opts.max_tokens
-  if (isReasoningModel(model)) body.enable_thinking = false
   if (opts.tools?.length) { body.tools = opts.tools; body.tool_choice = 'auto' }
 
   const controller = new AbortController()
@@ -69,7 +68,6 @@ export async function* chatCompletionStream(
     stream_options: { include_usage: true },
   }
   if (opts.max_tokens) body.max_tokens = opts.max_tokens
-  if (isReasoningModel(model)) body.enable_thinking = false
   if (opts.tools?.length) { body.tools = opts.tools; body.tool_choice = 'auto' }
 
   const controller = new AbortController()
