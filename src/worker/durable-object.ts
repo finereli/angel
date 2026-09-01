@@ -27,6 +27,13 @@ interface WsAttachment {
   timeoutId?: number // pending auth-timeout timer, cleared on successful auth
 }
 
+// Only parts a saved reply should carry: text, and tools that actually finished.
+// A tool announced but never resolved (stop, error, truncation) would render as
+// completed after a reload.
+function completedParts(parts: StreamPart[]): StreamPart[] {
+  return parts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined))
+}
+
 export class AngelDO implements DurableObject {
   private state: DurableObjectState
   private env: Env
@@ -35,6 +42,10 @@ export class AngelDO implements DurableObject {
   // own serialized chain so it never blocks the next response.
   private responseChain: Promise<void> = Promise.resolve()
   private memoryChain: Promise<void> = Promise.resolve()
+  // clientMsgId -> saved message id, so a resend after a dropped confirmation
+  // (reconnect replay) doesn't insert the message and run the agent twice.
+  // In-memory only: a DO restart clears it, which just reopens the tiny window.
+  private processedClientMsgs = new Map<string, number>()
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -274,12 +285,25 @@ export class AngelDO implements DurableObject {
     return row ? { agentId: row.id, agentName: row.name, agentModel: row.model } : null
   }
 
+  // How much history a conversation load ships to the client. The DM is the
+  // agent's entire merged stream, so an unbounded load grows forever; older
+  // history stays reachable to the agent through the pyramid.
+  private static readonly CONV_LOAD_LIMIT = 300
+
   private async handleConvLoad(ws: WebSocket, conversationId: string) {
     const rows = await this.env.DB.prepare(
-      `SELECT * FROM messages WHERE conversation_id = ? ORDER BY id ASC`
-    ).bind(conversationId).all<MessageRow>()
+      `SELECT * FROM (
+         SELECT * FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
+       ) ORDER BY id ASC`
+    ).bind(conversationId, AngelDO.CONV_LOAD_LIMIT).all<MessageRow>()
 
     const stream = this.activeStreams.get(conversationId)
+    // The in-progress reply is progressively saved to D1, so it can already be
+    // in `rows`; the client renders it from the stream snapshot instead, and
+    // sending both would show the same reply twice.
+    const messages = stream?.savedMsgId
+      ? rows.results.filter(m => m.id !== stream.savedMsgId)
+      : rows.results
     const snapshot: StreamSnapshot | undefined = stream
       ? { conversationId, seq: stream.seq, text: stream.text, tools: stream.tools, parts: stream.parts }
       : undefined
@@ -287,12 +311,19 @@ export class AngelDO implements DurableObject {
     this.send(ws, {
       type: 'conv:messages',
       conversationId,
-      messages: rows.results,
+      messages,
       stream: snapshot,
     })
   }
 
   private async handleChat(conversationId: string, clientMsgId: string, content: string) {
+    // Replay after a dropped confirmation: re-confirm to the client, run nothing.
+    const dupId = this.processedClientMsgs.get(clientMsgId)
+    if (dupId !== undefined) {
+      this.broadcast({ type: 'msg:user', conversationId, clientMsgId, messageId: dupId, content })
+      return
+    }
+
     const agent = await this.resolveAgent(conversationId)
     if (!agent) {
       console.error('[handleChat] no agent for conversation:', conversationId)
@@ -300,14 +331,18 @@ export class AngelDO implements DurableObject {
     }
 
     try {
-      await this.saveUserMessage(conversationId, content, clientMsgId)
+      const messageId = await this.saveUserMessage(conversationId, content, clientMsgId)
+      this.processedClientMsgs.set(clientMsgId, messageId)
+      if (this.processedClientMsgs.size > 300) {
+        const oldest = this.processedClientMsgs.keys().next().value
+        if (oldest) this.processedClientMsgs.delete(oldest)
+      }
     } catch (e) {
       console.error('[handleChat] save user message failed:', e instanceof Error ? e.message : e)
       return
     }
 
     await this.runTurn(conversationId, agent.agentId, agent.agentName, agent.agentModel, content)
-    await this.syncAlarm()
   }
 
   private async touchConversation(conversationId: string): Promise<void> {
@@ -342,6 +377,10 @@ export class AngelDO implements DurableObject {
     this.memoryChain = memLink.then(() => {}, () => {})
     try { await memLink }
     catch (e) { console.error('[runTurn] memory failed:', e instanceof Error ? e.message : e) }
+
+    // The agent may have (re)scheduled a wake-up during this turn - re-arm the
+    // DO alarm on every turn path (chat, wake-up, restart recovery).
+    await this.syncAlarm().catch(e => console.error('[runTurn] syncAlarm failed:', e instanceof Error ? e.message : e))
   }
 
   private async streamResponse(conversationId: string, agentId: string, agentName: string, agentModel: string | null, content: string): Promise<string> {
@@ -427,7 +466,7 @@ export class AngelDO implements DurableObject {
             this.log('info', 'stream:done', `textLen=${stream.text.length} parts=${stream.parts.length} usage=${event.usage?.input}/${event.usage?.output} finish=${event.finishReason ?? '?'}`, agentId, conversationId)
             stream.savedMsgId = await this.saveAssistant(
               conversationId, stream.text || '*(no response)*',
-              stream.parts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined)),
+              completedParts(stream.parts),
               event.usage, stream.savedMsgId,
             )
             this.broadcast({ type: 'done', conversationId, seq: stream.seq, usage: event.usage })
@@ -439,11 +478,15 @@ export class AngelDO implements DurableObject {
       }
 
       // Stop: persist whatever we had so it isn't lost, and close the stream out.
-      // Only if we didn't already save on `done` - avoids a double message.
-      if (stream.aborted && !sawDone && stream.text.trim()) {
+      // Only save if we didn't already on `done` (avoids a double message), but
+      // ALWAYS broadcast done - even a stop with nothing streamed yet must
+      // release the client from its streaming state.
+      if (stream.aborted && !sawDone) {
         this.log('warn', 'stream:aborted', `textLen=${stream.text.length} savedMsgId=${stream.savedMsgId}`, agentId, conversationId)
-        stream.parts.push({ type: 'text', content: '\n\n*(stopped)*' })
-        await this.saveAssistant(conversationId, stream.text + '\n\n*(stopped)*', stream.parts, undefined, stream.savedMsgId)
+        if (stream.text.trim()) {
+          stream.parts.push({ type: 'text', content: '\n\n*(stopped)*' })
+          await this.saveAssistant(conversationId, stream.text + '\n\n*(stopped)*', completedParts(stream.parts), undefined, stream.savedMsgId)
+        }
         stream.seq++
         this.broadcast({ type: 'done', conversationId, seq: stream.seq })
       }
@@ -455,7 +498,7 @@ export class AngelDO implements DurableObject {
       const hadText = stream.text.trim().length > 0
       if (hadText) stream.parts.push({ type: 'text', content: `\n\n*(error: ${errMsg})*` })
       const finalContent = hadText ? `${stream.text}\n\n*(error: ${errMsg})*` : `*Error: ${errMsg}*`
-      await this.saveAssistant(conversationId, finalContent, hadText ? stream.parts : undefined, undefined, stream.savedMsgId).catch(() => {})
+      await this.saveAssistant(conversationId, finalContent, hadText ? completedParts(stream.parts) : undefined, undefined, stream.savedMsgId).catch(() => {})
     } finally {
       this.activeStreams.delete(conversationId)
       await this.state.storage.delete(`streaming:${conversationId}`)
@@ -502,7 +545,10 @@ export class AngelDO implements DurableObject {
       const meta = await storeDocument(this.env, conversationId, title || 'Untitled document', text)
       this.broadcast({ type: 'doc:added', conversationId, clientDocId, id: meta.id, title: meta.title, lineCount: meta.line_count })
     } catch (e) {
-      console.error('[handleDocAdd]', e instanceof Error ? e.message : e)
+      const message = e instanceof Error ? e.message : 'Failed to store document'
+      console.error('[handleDocAdd]', message)
+      // Tell the client - otherwise the pending chip spins forever and blocks sending.
+      this.broadcast({ type: 'doc:error', conversationId, clientDocId, message })
     }
   }
 

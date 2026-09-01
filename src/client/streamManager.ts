@@ -19,7 +19,15 @@ export interface ConversationState {
 }
 
 type Listener = () => void
-export interface DocAdded { conversationId: string; clientDocId: string; id: string; title: string; lineCount: number }
+// A document upload's resolution: its server-side id, or an error.
+export interface DocAdded {
+  conversationId: string
+  clientDocId: string
+  id?: string
+  title?: string
+  lineCount?: number
+  error?: string
+}
 type DocListener = (d: DocAdded) => void
 type RoomListener = () => void
 
@@ -252,12 +260,14 @@ class AngelClient {
           state.streamParts = rebuildPartsFromSnapshot(snapshot)
           state.streamSeq = snapshot.seq
         }
+        // A stream that ended while we were disconnected: clear its stale
+        // streaming state (the eager reload below fetches the finished reply).
         for (const [convId, state] of this.convStates) {
           if (state.streamState === 'streaming' && !activeIds.has(convId)) {
             state.streamState = 'idle'
             state.streamParts = []
             state.streamSeq = 0
-            this.send({ type: 'conv:load', conversationId: convId })
+            state.streamStartTime = 0
           }
         }
         if (this.pendingSend) {
@@ -312,6 +322,13 @@ class AngelClient {
 
       case 'msg:user': {
         const state = this.getConvState(msg.conversationId)
+        // Already known (a reload raced the confirmation, or a resend was
+        // re-confirmed) - appending again would duplicate a keyed row.
+        if (state.messages.some(m => m.id === msg.messageId)) {
+          this.pendingSend = null
+          this.notify()
+          break
+        }
         const confirmed = localMessage(msg.conversationId, 'user', msg.content, { id: msg.messageId })
         const optIdx = state.messages.findIndex(m => m.id < 0 && m.role === 'user')
         if (optIdx >= 0) {
@@ -452,6 +469,13 @@ class AngelClient {
       case 'doc:added': {
         for (const fn of this.docListeners) {
           try { fn(msg) } catch {}
+        }
+        break
+      }
+
+      case 'doc:error': {
+        for (const fn of this.docListeners) {
+          try { fn({ conversationId: msg.conversationId, clientDocId: msg.clientDocId, error: msg.message }) } catch {}
         }
         break
       }

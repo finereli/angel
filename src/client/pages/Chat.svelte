@@ -222,9 +222,15 @@
       }
     });
     unsubDoc = angel.onDocAdded((d) => {
+      if (d.error) {
+        const failed = pendingDocs.find(p => p.clientDocId === d.clientDocId);
+        if (failed) attachError = `Couldn't store "${failed.title}": ${d.error}`;
+        pendingDocs = pendingDocs.filter(p => p.clientDocId !== d.clientDocId);
+        return;
+      }
       pendingDocs = pendingDocs.map(p =>
         p.clientDocId === d.clientDocId
-          ? { ...p, status: 'ready', id: d.id, title: d.title, lines: d.lineCount }
+          ? { ...p, status: 'ready', id: d.id, title: d.title ?? p.title, lines: d.lineCount ?? p.lines }
           : p
       );
     });

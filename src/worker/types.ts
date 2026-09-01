@@ -233,6 +233,7 @@ export type ServerMsg =
   | { type: 'error'; conversationId: string; seq: number; message: string }
   | { type: 'stream:reset'; conversationId: string; seq: number; parts: StreamPart[] }
   | { type: 'doc:added'; conversationId: string; clientDocId: string; id: string; title: string; lineCount: number }
+  | { type: 'doc:error'; conversationId: string; clientDocId: string; message: string }
   | { type: 'room:messages'; messages: ChatroomMessageRow[] }
   | { type: 'room:new'; message: ChatroomMessageRow }
   | { type: 'wall:pins'; pins: WallPinRow[] }
