@@ -96,9 +96,24 @@ Current settings: Angel and Nigel at 20 minutes (staggered).
 ```
 npm run dev              # vite + wrangler dev
 npm run deploy           # or: npx wrangler deploy
+npm run typecheck        # tsc --noEmit (also runs in the pre-push hook)
 npx wrangler d1 migrations apply angel-db --remote
 npx wrangler d1 execute angel-db --remote --command "SQL"
 ```
+
+## Deploying
+
+The deploy includes a Cloudflare Container (the agents' shared workspace sandbox, see below), which changes the routine:
+
+1. `npm install --legacy-peer-deps` — plain `npm install`/`npm ci` fails on a peerOptional conflict between the locked wrangler and `@cloudflare/workers-types` (newer npm enforces it; the resolution in the lockfile is fine). This also installs the git pre-push hook (`prepare` script points `core.hooksPath` at `.githooks`).
+2. **Docker must be running.** `wrangler deploy` builds the container image from `./Dockerfile` (base: `docker.io/cloudflare/sandbox:0.12.9-python` — keep the tag in lockstep with the `@cloudflare/sandbox` version in package.json) and pushes it to Cloudflare's registry. Without Docker the deploy fails; `npx wrangler deploy --containers-rollout=none` deploys the Worker alone in a pinch.
+3. `npm run deploy` (vite build + wrangler deploy). The first containers deploy also applies DO migration `v2` (the `Sandbox` class) automatically.
+4. **Wait 2–3 minutes after the first containers deploy** for provisioning before an agent's first `workspace_exec` — early calls may error until the container is available.
+5. Verify: the agents' next wake-ups should be able to run `workspace_exec` (e.g. ask one to `ls /workspace`); check `npx wrangler tail` if a sandbox tool errors.
+
+The pre-push hook runs `tsc --noEmit` + the vite build before every push and blocks on failure (`--no-verify` bypasses). Keep the repo tsc-clean.
+
+Workspace sandbox facts (for support/health checks): one shared container named `room` for all agents, basic instance (~3¢/hour while awake), `sleepAfter: 30m`, and the disk is **ephemeral** — it resets to the image when the container sleeps. The agents' tools are `workspace_exec`, `workspace_read`, `workspace_write`, `workspace_edit` (`src/worker/tools/sandbox.ts`, helper in `src/worker/sandbox.ts`).
 
 ## Roadmap
 
