@@ -1,6 +1,6 @@
 import type {
   ClientMsg, ServerMsg, MessageRow, StreamSnapshot,
-  ChatroomMessageRow, WallPinRow, AgentInfo,
+  ChatroomMessageRow, WallPinRow, AgentInfo, DmMessageRow,
 } from '../worker/types'
 
 export type ConnState = 'disconnected' | 'connecting' | 'authenticating' | 'connected' | 'reconnecting'
@@ -41,6 +41,9 @@ class AngelClient {
   private newRoomIds = new Set<number>()
   private wallListeners = new Set<RoomListener>()
   private wallPins: WallPinRow[] = []
+  private dmListeners = new Set<RoomListener>()
+  private dmMessages = new Map<string, DmMessageRow[]>()
+  private dmLoaded = new Set<string>()
   private reconnectDelay = 1000
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private pingInterval: ReturnType<typeof setInterval> | null = null
@@ -60,6 +63,8 @@ class AngelClient {
     return ids
   }
   getWallPins(): WallPinRow[] { return this.wallPins }
+  getDmMessages(agentId: string): DmMessageRow[] { return this.dmMessages.get(agentId) || [] }
+  isDmLoaded(agentId: string): boolean { return this.dmLoaded.has(agentId) }
 
   getConvState(id: string): ConversationState {
     if (!this.convStates.has(id)) {
@@ -96,6 +101,17 @@ class AngelClient {
     return () => this.wallListeners.delete(fn)
   }
 
+  onDmUpdate(fn: RoomListener): () => void {
+    this.dmListeners.add(fn)
+    return () => this.dmListeners.delete(fn)
+  }
+
+  private notifyDm() {
+    for (const fn of this.dmListeners) {
+      try { fn() } catch {}
+    }
+  }
+
   private notifyRoom() {
     for (const fn of this.roomListeners) {
       try { fn() } catch {}
@@ -125,6 +141,7 @@ class AngelClient {
     this.clearReconnectTimer()
     this.loadedConversations.clear()
     this.roomLoaded = false
+    this.dmLoaded.clear()
     if (this.ws) {
       this.ws.close(1000, 'Client disconnect')
       this.ws = null
@@ -395,6 +412,20 @@ class AngelClient {
         this.notifyWall()
         break
 
+      case 'dm:messages': {
+        this.dmMessages.set(msg.agentId, msg.messages)
+        this.dmLoaded.add(msg.agentId)
+        this.notifyDm()
+        break
+      }
+
+      case 'dm:new': {
+        const prev = this.dmMessages.get(msg.agentId) || []
+        this.dmMessages.set(msg.agentId, [...prev, msg.message])
+        this.notifyDm()
+        break
+      }
+
       case 'doc:added': {
         for (const fn of this.docListeners) {
           try { fn(msg) } catch {}
@@ -505,6 +536,14 @@ class AngelClient {
 
   unpinFromWall(messageId: number) {
     this.send({ type: 'wall:unpin', messageId })
+  }
+
+  loadDm(agentId: string) {
+    this.send({ type: 'dm:load', agentId })
+  }
+
+  postDm(agentId: string, content: string) {
+    this.send({ type: 'dm:post', agentId, content })
   }
 
   isOnWall(messageId: number): boolean {

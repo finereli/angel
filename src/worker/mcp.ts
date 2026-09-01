@@ -1,5 +1,5 @@
 import type { Context } from 'hono'
-import type { Env, ChatroomMessageRow, WallPinRow } from './types'
+import type { Env, ChatroomMessageRow, WallPinRow, DmMessageRow } from './types'
 import { verifyToken } from './oauth'
 
 type C = Context<{ Bindings: Env }>
@@ -99,6 +99,32 @@ const MCP_TOOLS = [
     name: 'get_cadence',
     description: 'Check the cadence setting for all agents.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'dm_read',
+    description: 'Read direct messages with an agent.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_name: { type: 'string', description: 'Agent name (e.g. "angel", "nigel")' },
+        limit: { type: 'number', description: 'Max messages to return (default 50, max 200)' },
+        since: { type: 'string', description: 'ISO timestamp — return messages after this time' },
+      },
+      required: ['agent_name'],
+    },
+  },
+  {
+    name: 'dm_send',
+    description: 'Send a direct message to an agent. Triggers an immediate agent wake.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        agent_name: { type: 'string', description: 'Agent name (e.g. "angel", "nigel")' },
+        content: { type: 'string', description: 'Message text' },
+        author: { type: 'string', description: 'Author name (defaults to your token identity)' },
+      },
+      required: ['agent_name', 'content'],
+    },
   },
 ]
 
@@ -248,6 +274,48 @@ async function callTool(env: Env, name: string, args: Record<string, unknown>, c
         return `${a.name}: cadence=${cadence}, next=${next}`
       })
       return { text: lines.join('\n') }
+    }
+
+    case 'dm_read': {
+      const agentName = (args.agent_name as string || '').trim().toLowerCase()
+      if (!agentName) return { text: 'agent_name is required.', isError: true }
+      const agent = await env.DB.prepare(`SELECT id FROM agents WHERE lower(name) = ?`).bind(agentName).first<{ id: string }>()
+      if (!agent) return { text: `No agent named "${agentName}".`, isError: true }
+      const since = (args.since as string | undefined)?.replace('T', ' ').replace('Z', '')
+      const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200)
+      let rows
+      if (since) {
+        rows = await env.DB.prepare(
+          `SELECT id, agent_id, author, content, created_at FROM dm_messages WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`
+        ).bind(agent.id, since, limit).all<DmMessageRow>()
+      } else {
+        rows = await env.DB.prepare(
+          `SELECT id, agent_id, author, content, created_at FROM dm_messages WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?`
+        ).bind(agent.id, limit).all<DmMessageRow>()
+        if (rows.results) rows.results.reverse()
+      }
+      const msgs = rows.results || []
+      if (msgs.length === 0) return { text: `No DMs with ${agentName}.` }
+      const lines = msgs.map(m => `[${m.created_at}] ${m.author}: ${m.content}`)
+      return { text: `${msgs.length} DM(s) with ${agentName}:\n${lines.join('\n')}` }
+    }
+
+    case 'dm_send': {
+      const agentName = (args.agent_name as string || '').trim().toLowerCase()
+      const content = (args.content as string || '').trim()
+      if (!agentName) return { text: 'agent_name is required.', isError: true }
+      if (!content) return { text: 'Empty message.', isError: true }
+      const agent = await env.DB.prepare(`SELECT id FROM agents WHERE lower(name) = ?`).bind(agentName).first<{ id: string }>()
+      if (!agent) return { text: `No agent named "${agentName}".`, isError: true }
+      const author = (args.author as string || callerId).trim()
+      const stub = doStub(env)
+      const res = await stub.fetch(new Request('http://do/api/dm/post', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: agent.id, author, content }),
+      }))
+      if (!res.ok) return { text: 'Failed to send DM.', isError: true }
+      return { text: `DM sent to ${agentName}.` }
     }
 
     default:

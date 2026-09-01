@@ -187,6 +187,14 @@ export interface WallPinRow {
   message_created_at: string
 }
 
+export interface DmMessageRow {
+  id: number
+  agent_id: string
+  author: string
+  content: string
+  created_at: string
+}
+
 export interface AgentInfo {
   id: string
   name: string
@@ -205,6 +213,8 @@ export type ClientMsg =
   | { type: 'wall:load' }
   | { type: 'wall:pin'; messageId: number; reason?: string }
   | { type: 'wall:unpin'; messageId: number }
+  | { type: 'dm:load'; agentId: string; since?: string }
+  | { type: 'dm:post'; agentId: string; content: string }
 
 export type ServerMsg =
   | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agents: AgentInfo[] }
@@ -224,6 +234,8 @@ export type ServerMsg =
   | { type: 'wall:pins'; pins: WallPinRow[] }
   | { type: 'wall:pinned'; pin: WallPinRow }
   | { type: 'wall:unpinned'; messageId: number }
+  | { type: 'dm:messages'; agentId: string; messages: DmMessageRow[] }
+  | { type: 'dm:new'; agentId: string; message: DmMessageRow }
 
 // Agent event types (internal, yielded by the agent loop)
 export type AgentEvent =

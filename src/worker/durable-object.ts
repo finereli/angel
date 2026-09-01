@@ -1,7 +1,7 @@
 import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
   MessageRow, AgentEvent, StreamPart,
-  ChatroomMessageRow, WallPinRow, AgentInfo,
+  ChatroomMessageRow, WallPinRow, AgentInfo, DmMessageRow,
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
 import { storeDocument, normalizeContent } from './documents'
@@ -128,6 +128,30 @@ export class AngelDO implements DurableObject {
         }
         return Response.json({ ok: true, removed: !!result.meta.changes })
       }
+      if (url.pathname === '/api/dm/post') {
+        const { agent_id, author, content } = await request.json() as { agent_id: string; author: string; content: string }
+        const clean = (content || '').trim()
+        if (!clean) return Response.json({ error: 'empty' }, { status: 400 })
+        const result = await this.env.DB.prepare(
+          `INSERT INTO dm_messages (agent_id, author, content) VALUES (?, ?, ?)`
+        ).bind(agent_id, author, clean).run()
+        const msg: DmMessageRow = {
+          id: result.meta.last_row_id, agent_id, author, content: clean,
+          created_at: new Date().toISOString(),
+        }
+        this.broadcast({ type: 'dm:new', agentId: agent_id, message: msg })
+        // Immediate wake if Eli is messaging an agent
+        if (author === 'eli') {
+          const preview = clean.slice(0, 80)
+          await this.env.DB.prepare(
+            `INSERT INTO agent_wakeups (agent_id, wake_at, reason)
+             VALUES (?, datetime('now'), ?)
+             ON CONFLICT(agent_id) DO UPDATE SET wake_at = datetime('now'), reason = excluded.reason, created_at = datetime('now')`
+          ).bind(agent_id, `DM from Eli: ${preview}`).run()
+          await this.syncAlarm()
+        }
+        return Response.json({ ok: true, message: msg })
+      }
       if (url.pathname === '/api/sync-alarm') {
         await this.syncAlarm()
         return Response.json({ ok: true })
@@ -219,6 +243,14 @@ export class AngelDO implements DurableObject {
 
       case 'wall:unpin':
         await this.handleWallUnpin(msg.messageId)
+        break
+
+      case 'dm:load':
+        await this.handleDmLoad(ws, msg.agentId, msg.since)
+        break
+
+      case 'dm:post':
+        await this.handleDmPost(msg.agentId, msg.content)
         break
     }
   }
@@ -541,6 +573,44 @@ export class AngelDO implements DurableObject {
   private async broadcastWallState() {
     const rows = await this.env.DB.prepare(AngelDO.WALL_QUERY).all<WallPinRow>()
     this.broadcast({ type: 'wall:pins', pins: rows.results || [] })
+  }
+
+  // --- DMs ---
+
+  private async handleDmLoad(ws: WebSocket, agentId: string, since?: string) {
+    let rows
+    if (since) {
+      rows = await this.env.DB.prepare(
+        `SELECT id, agent_id, author, content, created_at FROM dm_messages WHERE agent_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 200`
+      ).bind(agentId, since).all<DmMessageRow>()
+    } else {
+      rows = await this.env.DB.prepare(
+        `SELECT id, agent_id, author, content, created_at FROM dm_messages WHERE agent_id = ? ORDER BY created_at DESC LIMIT 100`
+      ).bind(agentId).all<DmMessageRow>()
+      if (rows.results) rows.results.reverse()
+    }
+    this.send(ws, { type: 'dm:messages', agentId, messages: rows.results || [] })
+  }
+
+  private async handleDmPost(agentId: string, content: string) {
+    const clean = content.trim()
+    if (!clean) return
+    const result = await this.env.DB.prepare(
+      `INSERT INTO dm_messages (agent_id, author, content) VALUES (?, 'eli', ?)`
+    ).bind(agentId, clean).run()
+    const msg: DmMessageRow = {
+      id: result.meta.last_row_id, agent_id: agentId, author: 'eli',
+      content: clean, created_at: new Date().toISOString(),
+    }
+    this.broadcast({ type: 'dm:new', agentId, message: msg })
+    // Immediate agent wake
+    const preview = clean.slice(0, 80)
+    await this.env.DB.prepare(
+      `INSERT INTO agent_wakeups (agent_id, wake_at, reason)
+       VALUES (?, datetime('now'), ?)
+       ON CONFLICT(agent_id) DO UPDATE SET wake_at = datetime('now'), reason = excluded.reason, created_at = datetime('now')`
+    ).bind(agentId, `DM from Eli: ${preview}`).run()
+    await this.syncAlarm()
   }
 
   // --- Restart recovery ---

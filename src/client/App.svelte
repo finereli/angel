@@ -4,6 +4,7 @@
   import Login from './pages/Login.svelte';
   import Chat from './pages/Chat.svelte';
   import Chatroom from './pages/Chatroom.svelte';
+  import DM from './pages/DM.svelte';
 
   let connState = angel.getConnState();
   let agents = angel.getAgents();
@@ -12,9 +13,11 @@
   let darkMode = false;
   let appMenuOpen = false;
   let agentsLoaded = angel.hasLoadedAgents();
-  type View = 'chat' | 'room';
+  type View = 'chat' | 'room' | 'dm';
   let view: View = (localStorage.getItem('lastView') as View) || 'chat';
   let showWall = false;
+  let dmAgentId: string | null = localStorage.getItem('lastDmAgentId');
+  let channelsOpen = false;
 
   let unsub: (() => void) | null = null;
 
@@ -25,6 +28,8 @@
   $: localStorage.setItem('lastView', view);
 
   $: currentAgentName = agents.find(a => a.conversationId === currentChatId)?.name || '';
+  $: dmAgentName = agents.find(a => a.id === dmAgentId)?.name || '';
+  $: if (dmAgentId) localStorage.setItem('lastDmAgentId', dmAgentId);
 
   onMount(() => {
     darkMode = localStorage.getItem('darkMode') === 'true' ||
@@ -82,6 +87,12 @@
     menuOpen = false;
   }
 
+  function selectDm(agentId: string) {
+    dmAgentId = agentId;
+    view = 'dm';
+    menuOpen = false;
+  }
+
   function toggleDark() {
     darkMode = !darkMode;
     applyDarkMode(darkMode);
@@ -123,27 +134,45 @@
         </div>
       </div>
       <div class="channel-list">
-        <button
-          class="channel-item room"
-          class:active={view === 'room'}
-          on:click={selectRoom}
-        >
-          <span class="channel-icon">#</span>
-          <span class="channel-name">chatroom</span>
-        </button>
-
         <div class="section-label">Direct messages</div>
 
         {#each agents as agent (agent.id)}
           <button
             class="channel-item"
-            class:active={view === 'chat' && currentChatId === agent.conversationId}
-            on:click={() => selectAgent(agent.conversationId)}
+            class:active={view === 'dm' && dmAgentId === agent.id}
+            on:click={() => selectDm(agent.id)}
           >
             <span class="channel-icon dm">@</span>
             <span class="channel-name">{agent.name}</span>
           </button>
         {/each}
+
+        <button class="section-label toggle" on:click={() => channelsOpen = !channelsOpen}>
+          <span class="toggle-arrow" class:open={channelsOpen}>{channelsOpen ? '▾' : '▸'}</span>
+          Channels
+        </button>
+
+        {#if channelsOpen}
+          <button
+            class="channel-item room"
+            class:active={view === 'room'}
+            on:click={selectRoom}
+          >
+            <span class="channel-icon">&amp;</span>
+            <span class="channel-name">chatroom</span>
+          </button>
+
+          {#each agents as agent (agent.id)}
+            <button
+              class="channel-item"
+              class:active={view === 'chat' && currentChatId === agent.conversationId}
+              on:click={() => selectAgent(agent.conversationId)}
+            >
+              <span class="channel-icon">&amp;</span>
+              <span class="channel-name">{agent.name}</span>
+            </button>
+          {/each}
+        {/if}
       </div>
       <div class="sidebar-footer">
         <button class="footer-btn" on:click={toggleDark}>
@@ -161,9 +190,11 @@
         </button>
         <span class="app-bar-title">
           {#if view === 'room'}
-            # chatroom
-          {:else if currentAgentName}
-            @ {currentAgentName}
+            &amp; chatroom
+          {:else if view === 'dm' && dmAgentName}
+            @ {dmAgentName}
+          {:else if view === 'chat' && currentAgentName}
+            &amp; {currentAgentName}
           {:else}
             Angel
           {/if}
@@ -190,7 +221,9 @@
 
       {#if view === 'room'}
         <Chatroom bind:showWall />
-      {:else if currentChatId}
+      {:else if view === 'dm' && dmAgentId}
+        <DM agentId={dmAgentId} agentName={dmAgentName} />
+      {:else if view === 'chat' && currentChatId}
         <Chat conversationId={currentChatId} />
       {:else if agentsLoaded && agents.length === 0}
         <div class="empty-state">
@@ -259,6 +292,21 @@
     color: var(--text-secondary);
     padding: 16px 12px 4px;
     font-weight: 600;
+  }
+  .section-label.toggle {
+    width: 100%;
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    text-align: left;
+  }
+  .section-label.toggle:hover { color: var(--text-primary); }
+  .toggle-arrow {
+    font-size: 0.6rem;
+    width: 0.8em;
   }
 
   .channel-item {

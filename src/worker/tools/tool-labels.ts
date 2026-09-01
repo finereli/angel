@@ -42,4 +42,6 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   x402_check: ['Checking x402 endpoint', 'Checked x402 endpoint'],
   track_service: ['Tracking service', 'Tracked service'],
   list_services: ['Listing services', 'Listed services'],
+  dm_read: ['Reading DMs', 'Read DMs'],
+  dm_send: ['Sending DM', 'Sent DM'],
 }
