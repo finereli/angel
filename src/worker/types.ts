@@ -221,10 +221,10 @@ export type ClientMsg =
   | { type: 'dm:post'; agentId: string; content: string }
 
 export type ServerMsg =
-  | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agents: AgentInfo[] }
+  | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agents: AgentInfo[]; pendingTurns: string[] }
   | { type: 'auth:fail' }
   | { type: 'pong'; ts: number }
-  | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot }
+  | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot; pending?: boolean }
   | { type: 'msg:user'; conversationId: string; clientMsgId: string; messageId: number; content: string }
   | { type: 'text'; conversationId: string; seq: number; content: string }
   | { type: 'tool_start'; conversationId: string; seq: number; id: string; name: string; label: string }

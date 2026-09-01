@@ -20,6 +20,7 @@
   let channelsOpen = false;
 
   let unsub: (() => void) | null = null;
+  let busyAgents = new Set<string>();
 
   $: if (currentChatId) {
     localStorage.setItem('lastConversationId', currentChatId);
@@ -40,6 +41,11 @@
       connState = angel.getConnState();
       agents = angel.getAgents();
       agentsLoaded = angel.hasLoadedAgents();
+      busyAgents = new Set(
+        agents
+          .filter(a => angel.getConvState(a.conversationId).streamState === 'streaming')
+          .map(a => a.id)
+      );
 
       if (agents.length > 0 && !currentChatId) {
         const last = localStorage.getItem('lastConversationId');
@@ -153,6 +159,9 @@
           >
             <span class="channel-icon dm">@</span>
             <span class="channel-name">{agent.name}</span>
+            {#if busyAgents.has(agent.id)}
+              <span class="busy-dot" title="Responding..."></span>
+            {/if}
           </button>
         {/each}
 
@@ -374,6 +383,15 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
+  }
+  .busy-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-left: auto;
+    flex-shrink: 0;
+    animation: pulse 1.5s infinite;
   }
   .status-dot.connected { background: #22c55e; }
   .status-dot.reconnecting { background: #f59e0b; animation: pulse 1.5s infinite; }

@@ -46,6 +46,10 @@ export class AngelDO implements DurableObject {
   // (reconnect replay) doesn't insert the message and run the agent twice.
   // In-memory only: a DO restart clears it, which just reopens the tiny window.
   private processedClientMsgs = new Map<string, number>()
+  // Turns queued behind the response chain but not yet streaming, per
+  // conversation. Lets a reconnecting client show "responding..." for a reply
+  // that is coming but hasn't produced its first event yet.
+  private pendingTurns = new Map<string, number>()
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -194,7 +198,10 @@ export class AngelDO implements DurableObject {
           })
         }
         const agents = await this.loadAgents()
-        this.send(ws, { type: 'auth:ok', activeStreams: snapshots, agents })
+        this.send(ws, {
+          type: 'auth:ok', activeStreams: snapshots, agents,
+          pendingTurns: Array.from(this.pendingTurns.keys()),
+        })
       } else {
         this.send(ws, { type: 'auth:fail' })
         ws.close(4001, 'Bad PIN')
@@ -313,6 +320,7 @@ export class AngelDO implements DurableObject {
       conversationId,
       messages,
       stream: snapshot,
+      pending: this.pendingTurns.has(conversationId) || undefined,
     })
   }
 
@@ -365,9 +373,20 @@ export class AngelDO implements DurableObject {
     return result.meta.last_row_id
   }
 
+  private markPending(conversationId: string) {
+    this.pendingTurns.set(conversationId, (this.pendingTurns.get(conversationId) || 0) + 1)
+  }
+
+  private unmarkPending(conversationId: string) {
+    const n = (this.pendingTurns.get(conversationId) || 0) - 1
+    if (n <= 0) this.pendingTurns.delete(conversationId)
+    else this.pendingTurns.set(conversationId, n)
+  }
+
   // Run a full turn for a saved user-side message: the streamed response on the
   // response chain, then the memory work on its own serialized chain.
   private async runTurn(conversationId: string, agentId: string, agentName: string, agentModel: string | null, content: string): Promise<void> {
+    this.markPending(conversationId)
     const respLink = this.responseChain.then(() => this.streamResponse(conversationId, agentId, agentName, agentModel, content))
     this.responseChain = respLink.then(() => {}, () => {})
     try { await respLink }
@@ -384,6 +403,7 @@ export class AngelDO implements DurableObject {
   }
 
   private async streamResponse(conversationId: string, agentId: string, agentName: string, agentModel: string | null, content: string): Promise<string> {
+    this.unmarkPending(conversationId) // no longer queued: it's live from here
     const stream: ActiveStream = {
       conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, savedLen: 0, tools: [], parts: [], aborted: false, savedMsgId: null,
     }

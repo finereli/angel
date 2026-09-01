@@ -253,6 +253,7 @@ class AngelClient {
         this.agents = msg.agents
         this.agentsLoaded = true
         const activeIds = new Set(msg.activeStreams.map(s => s.conversationId))
+        const pendingIds = new Set(msg.pendingTurns || [])
         for (const snapshot of msg.activeStreams) {
           const state = this.getConvState(snapshot.conversationId)
           state.streamState = 'streaming'
@@ -260,10 +261,21 @@ class AngelClient {
           state.streamParts = rebuildPartsFromSnapshot(snapshot)
           state.streamSeq = snapshot.seq
         }
+        // A queued turn hasn't streamed anything yet, but a reply is coming:
+        // show it as streaming-with-no-parts (the typing indicator).
+        for (const convId of pendingIds) {
+          const state = this.getConvState(convId)
+          if (state.streamState !== 'streaming') {
+            state.streamState = 'streaming'
+            state.streamParts = []
+            state.streamSeq = 0
+            state.streamStartTime = Date.now()
+          }
+        }
         // A stream that ended while we were disconnected: clear its stale
         // streaming state (the eager reload below fetches the finished reply).
         for (const [convId, state] of this.convStates) {
-          if (state.streamState === 'streaming' && !activeIds.has(convId)) {
+          if (state.streamState === 'streaming' && !activeIds.has(convId) && !pendingIds.has(convId)) {
             state.streamState = 'idle'
             state.streamParts = []
             state.streamSeq = 0
@@ -315,6 +327,12 @@ class AngelClient {
           if (!state.streamStartTime) state.streamStartTime = Date.now()
           state.streamParts = rebuildPartsFromSnapshot(msg.stream)
           state.streamSeq = msg.stream.seq
+        } else if (msg.pending && state.streamState !== 'streaming') {
+          // A reply is queued server-side but hasn't started streaming.
+          state.streamState = 'streaming'
+          state.streamParts = []
+          state.streamSeq = 0
+          state.streamStartTime = Date.now()
         }
         this.notify()
         break
