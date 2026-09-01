@@ -134,6 +134,15 @@
         </div>
       </div>
       <div class="channel-list">
+        <button
+          class="channel-item room"
+          class:active={view === 'room'}
+          on:click={selectRoom}
+        >
+          <span class="channel-icon">#</span>
+          <span class="channel-name">chatroom</span>
+        </button>
+
         <div class="section-label">Direct messages</div>
 
         {#each agents as agent (agent.id)}
@@ -149,19 +158,10 @@
 
         <button class="section-label toggle" on:click={() => channelsOpen = !channelsOpen}>
           <span class="toggle-arrow" class:open={channelsOpen}>{channelsOpen ? '▾' : '▸'}</span>
-          Channels
+          Streams
         </button>
 
         {#if channelsOpen}
-          <button
-            class="channel-item room"
-            class:active={view === 'room'}
-            on:click={selectRoom}
-          >
-            <span class="channel-icon">&amp;</span>
-            <span class="channel-name">chatroom</span>
-          </button>
-
           {#each agents as agent (agent.id)}
             <button
               class="channel-item"
@@ -190,7 +190,7 @@
         </button>
         <span class="app-bar-title">
           {#if view === 'room'}
-            &amp; chatroom
+            # chatroom
           {:else if view === 'dm' && dmAgentName}
             @ {dmAgentName}
           {:else if view === 'chat' && currentAgentName}

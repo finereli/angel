@@ -239,6 +239,10 @@ class AngelClient {
         }
         this.send({ type: 'room:load' })
         this.send({ type: 'wall:load' })
+        // Eagerly load all DM threads so switching is instant
+        for (const agent of msg.agents) {
+          this.send({ type: 'dm:load', agentId: agent.id })
+        }
         this.notify()
         break
       }
