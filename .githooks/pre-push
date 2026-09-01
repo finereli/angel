@@ -1,0 +1,13 @@
+#!/bin/sh
+# Verify before every push: the typecheck and the client build must pass.
+# Installed via `npm install` (the package.json "prepare" script points
+# git's core.hooksPath at .githooks). Bypass in an emergency with --no-verify.
+set -e
+
+echo "pre-push: tsc --noEmit"
+npx tsc --noEmit
+
+echo "pre-push: vite build"
+npm run build --silent >/dev/null
+
+echo "pre-push: OK"

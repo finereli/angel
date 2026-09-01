@@ -43,18 +43,20 @@ const ADVERBS = [
 function cryptoRandom(max: number): number {
   const arr = new Uint32Array(1)
   crypto.getRandomValues(arr)
-  return arr[0] % max
+  return arr[0]! % max
 }
 
 function pick<T>(list: T[]): T {
-  return list[cryptoRandom(list.length)]
+  return list[cryptoRandom(list.length)]!
 }
 
 function shuffle<T>(arr: T[]): T[] {
   const out = [...arr]
   for (let i = out.length - 1; i > 0; i--) {
     const j = cryptoRandom(i + 1)
-    ;[out[i], out[j]] = [out[j], out[i]]
+    const tmp = out[i]!
+    out[i] = out[j]!
+    out[j] = tmp
   }
   return out
 }
@@ -66,7 +68,7 @@ function randomWords(count: number): string[] {
   const max = Math.min(count, all.length)
   while (words.length < max) {
     const idx = cryptoRandom(all.length)
-    if (!used.has(idx)) { used.add(idx); words.push(all[idx]) }
+    if (!used.has(idx)) { used.add(idx); words.push(all[idx]!) }
   }
   return words
 }

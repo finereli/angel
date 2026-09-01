@@ -271,7 +271,7 @@ function pinAuth(c: { env: Env; req: { header: (n: string) => string | undefined
 }
 
 app.post('/api/room/read', async (c) => {
-  const body = await c.req.json<{ pin?: string; since?: string; limit?: number }>().catch(() => ({}))
+  const body = await c.req.json<{ pin?: string; since?: string; limit?: number }>().catch((): { pin?: string; since?: string; limit?: number } => ({}))
   const denied = pinAuth(c, body)
   if (denied) return denied
   const since = body.since?.replace('T', ' ').replace('Z', '')
@@ -291,7 +291,7 @@ app.post('/api/room/read', async (c) => {
 })
 
 app.post('/api/room/post', async (c) => {
-  const body = await c.req.json<{ pin?: string; author?: string; content?: string }>().catch(() => ({}))
+  const body = await c.req.json<{ pin?: string; author?: string; content?: string }>().catch((): { pin?: string; author?: string; content?: string } => ({}))
   const denied = pinAuth(c, body)
   if (denied) return denied
   const author = (body.author || 'claude').trim()
@@ -311,7 +311,7 @@ app.post('/api/room/post', async (c) => {
 })
 
 app.post('/api/room/search', async (c) => {
-  const body = await c.req.json<{ pin?: string; query?: string; limit?: number }>().catch(() => ({}))
+  const body = await c.req.json<{ pin?: string; query?: string; limit?: number }>().catch((): { pin?: string; query?: string; limit?: number } => ({}))
   const denied = pinAuth(c, body)
   if (denied) return denied
   const query = (body.query || '').trim()
@@ -828,7 +828,7 @@ app.post('/api/rewrite-lite', rewriteHandler)
 // Bootstrap endpoint: signs an x402 payment via CDP SDK and calls the rewrite
 // endpoint internally to catalyze the Bazaar listing. PIN-protected.
 app.post('/api/bootstrap-bazaar', async (c) => {
-  const body = await c.req.json<{ pin?: string }>().catch(() => ({}))
+  const body = await c.req.json<{ pin?: string }>().catch((): { pin?: string } => ({}))
   if (body.pin !== c.env.PIN) return c.json({ error: 'unauthorized' }, 401)
 
   const wallet = c.env.X402_WALLET_ADDRESS

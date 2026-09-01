@@ -10,7 +10,9 @@
     "build": "vite build",
     "deploy": "vite build && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply angel-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply angel-db --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply angel-db --remote",
+    "typecheck": "tsc --noEmit",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "dependencies": {
     "@cloudflare/sandbox": "^0.12.9",
