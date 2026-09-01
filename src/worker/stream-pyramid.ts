@@ -10,9 +10,6 @@ export interface Pair {
   userTs: string
   assistantContent: string
   assistantTs: string | null
-  conversationId: string
-  topic: string | null
-  title: string | null
 }
 
 export async function getTotalPairs(env: Env, conversationId: string): Promise<number> {
@@ -24,46 +21,46 @@ export async function getTotalPairs(env: Env, conversationId: string): Promise<n
 
 export async function getPairsInRange(env: Env, conversationId: string, startIdx: number, endIdx: number): Promise<Pair[]> {
   if (endIdx < startIdx) return []
-  const users = await env.DB.prepare(
+  const users = (await env.DB.prepare(
     `WITH u AS (
-       SELECT id, conversation_id, content, created_at,
+       SELECT id, content, created_at,
               ROW_NUMBER() OVER (ORDER BY created_at, id) - 1 AS idx
        FROM messages WHERE role = 'user' AND conversation_id = ?
      )
-     SELECT u.idx, u.id, u.conversation_id, u.content, u.created_at,
-            c.topic, c.title
-     FROM u JOIN conversations c ON c.id = u.conversation_id
-     WHERE u.idx BETWEEN ? AND ?
-     ORDER BY u.idx`
+     SELECT idx, id, content, created_at FROM u
+     WHERE idx BETWEEN ? AND ?
+     ORDER BY idx`
   ).bind(conversationId, startIdx, endIdx).all<{
-    idx: number; id: number; conversation_id: string; content: string;
-    created_at: string; topic: string | null; title: string | null
-  }>()
+    idx: number; id: number; content: string; created_at: string
+  }>()).results
+  if (users.length === 0) return []
 
-  const pairs: Pair[] = []
-  for (const u of users.results) {
-    const nextUser = await env.DB.prepare(
-      `SELECT MIN(id) as nid FROM messages WHERE role = 'user' AND conversation_id = ? AND id > ?`
-    ).bind(conversationId, u.id).first<{ nid: number | null }>()
-    const upper = nextUser?.nid ?? Number.MAX_SAFE_INTEGER
-    const asst = await env.DB.prepare(
-      `SELECT content, created_at FROM messages
-       WHERE role = 'assistant' AND conversation_id = ? AND content IS NOT NULL AND content != ''
-         AND id > ? AND id < ?
-       ORDER BY id ASC`
-    ).bind(conversationId, u.id, upper).all<{ content: string; created_at: string }>()
-    pairs.push({
+  // One fetch for every assistant message in the range: from the first selected
+  // user message up to the next user message after the range (or the stream's end),
+  // then grouped under the user message each reply followed.
+  const lastUser = users[users.length - 1]!
+  const nextUser = await env.DB.prepare(
+    `SELECT MIN(id) as nid FROM messages WHERE role = 'user' AND conversation_id = ? AND id > ?`
+  ).bind(conversationId, lastUser.id).first<{ nid: number | null }>()
+  const upper = nextUser?.nid ?? Number.MAX_SAFE_INTEGER
+  const asst = (await env.DB.prepare(
+    `SELECT id, content, created_at FROM messages
+     WHERE role = 'assistant' AND conversation_id = ? AND content IS NOT NULL AND content != ''
+       AND id > ? AND id < ?
+     ORDER BY id ASC`
+  ).bind(conversationId, users[0]!.id, upper).all<{ id: number; content: string; created_at: string }>()).results
+
+  return users.map((u, i) => {
+    const bound = i + 1 < users.length ? users[i + 1]!.id : upper
+    const replies = asst.filter(a => a.id > u.id && a.id < bound)
+    return {
       idx: u.idx,
       userContent: u.content,
       userTs: u.created_at,
-      assistantContent: asst.results.map(a => a.content).join('\n\n'),
-      assistantTs: asst.results.length ? asst.results[asst.results.length - 1]!.created_at : null,
-      conversationId: u.conversation_id,
-      topic: u.topic,
-      title: u.title,
-    })
-  }
-  return pairs
+      assistantContent: replies.map(a => a.content).join('\n\n'),
+      assistantTs: replies.length ? replies[replies.length - 1]!.created_at : null,
+    }
+  })
 }
 
 // ---- Build: bottom-up, count-based, idempotent, background ----

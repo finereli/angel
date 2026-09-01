@@ -1,4 +1,5 @@
 import type { Tool } from './registry'
+import { postRoomMessage, readRoomMessages } from '../chatroom'
 
 export const chatroomTools: Tool[] = [
   {
@@ -18,10 +19,8 @@ export const chatroomTools: Tool[] = [
     },
     label: ['Posting to chatroom', 'Posted to chatroom'],
     run: async (ctx, args) => {
-      const msg = args.message as string
-      await ctx.env.DB.prepare(
-        `INSERT INTO chatroom_messages (author, content) VALUES (?, ?)`
-      ).bind(ctx.agentId, msg).run()
+      const msg = await postRoomMessage(ctx.env, ctx.agentId, args.message as string)
+      ctx.broadcast?.({ type: 'room:new', message: msg })
       return 'Posted.'
     },
   },
@@ -41,19 +40,8 @@ export const chatroomTools: Tool[] = [
     },
     label: ['Reading chatroom', 'Read chatroom'],
     run: async (ctx, args) => {
-      const since = (args.since as string | undefined)?.replace('T', ' ').replace('Z', '')
-      let rows
-      if (since) {
-        rows = await ctx.env.DB.prepare(
-          `SELECT id, author, content, created_at FROM chatroom_messages WHERE created_at > ? ORDER BY created_at ASC LIMIT 200`
-        ).bind(since).all<{ id: number; author: string; content: string; created_at: string }>()
-      } else {
-        rows = await ctx.env.DB.prepare(
-          `SELECT id, author, content, created_at FROM chatroom_messages ORDER BY created_at DESC LIMIT 50`
-        ).all<{ id: number; author: string; content: string; created_at: string }>()
-        if (rows.results) rows.results.reverse()
-      }
-      const messages = rows.results || []
+      const since = args.since as string | undefined
+      const messages = await readRoomMessages(ctx.env, since)
       if (messages.length === 0) return since ? 'No new messages since that time.' : 'The chatroom is empty.'
       const lines = messages.map(m => `[${m.created_at}] ${m.author}: ${m.content}`)
       const header = since ? `${messages.length} message(s) since ${since}:` : `Last ${messages.length} message(s):`

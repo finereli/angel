@@ -1,4 +1,4 @@
-import type { Env, ToolDefinition } from '../types'
+import type { Env, ServerMsg, ToolDefinition } from '../types'
 import { memoryTools } from './memory'
 import { listTools } from './lists'
 import { documentTools } from './documents'
@@ -21,6 +21,9 @@ export interface ToolContext {
   env: Env
   conversationId: string
   agentId: string
+  // Present when the tool runs inside the DO's live event loop; lets a tool
+  // push updates (e.g. a chatroom post) to connected clients immediately.
+  broadcast?: (msg: ServerMsg) => void
 }
 
 export interface Tool {
@@ -51,6 +54,11 @@ const ALL_TOOLS: Tool[] = [
 
 const byName = new Map(ALL_TOOLS.map(t => [t.def.function.name, t]))
 
+// [in-progress, done] labels per tool, derived from the tools themselves.
+export const TOOL_LABELS: Record<string, [string, string]> = Object.fromEntries(
+  ALL_TOOLS.map(t => [t.def.function.name, t.label])
+)
+
 export function getToolDefinitions(): ToolDefinition[] {
   return ALL_TOOLS.map(t => t.def)
 }
@@ -62,5 +70,3 @@ export async function executeTool(
   if (!tool) return `Unknown tool: ${name}`
   return tool.run(ctx, args)
 }
-
-export { TOOL_LABELS } from './tool-labels'

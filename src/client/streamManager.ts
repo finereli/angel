@@ -1,15 +1,13 @@
 import type {
-  ClientMsg, ServerMsg, MessageRow, StreamSnapshot,
+  ClientMsg, ServerMsg, MessageRow, StreamSnapshot, StreamPart,
   ChatroomMessageRow, WallPinRow, AgentInfo, DmMessageRow,
 } from '../worker/types'
+
+export type { StreamPart }
 
 export type ConnState = 'disconnected' | 'connecting' | 'authenticating' | 'connected' | 'reconnecting'
 
 export type StreamState = 'idle' | 'streaming'
-
-export type StreamPart =
-  | { type: 'text'; content: string }
-  | { type: 'tool'; id: string; name: string; label: string; result?: string }
 
 export interface ConversationState {
   messages: MessageRow[]
@@ -26,6 +24,27 @@ type DocListener = (d: DocAdded) => void
 type RoomListener = () => void
 
 let nextMsgKey = -1
+
+// A locally-constructed message row (optimistic user echo, or an assistant reply
+// assembled from stream parts) with the DB-only fields nulled out.
+function localMessage(
+  conversationId: string, role: 'user' | 'assistant', content: string,
+  extra: Partial<MessageRow> = {},
+): MessageRow {
+  return {
+    id: nextMsgKey--,
+    conversation_id: conversationId,
+    role,
+    content,
+    created_at: new Date().toISOString(),
+    tool_calls: null,
+    tool_call_id: null,
+    usage_input: null,
+    usage_output: null,
+    parts: null,
+    ...extra,
+  }
+}
 
 class AngelClient {
   private ws: WebSocket | null = null
@@ -51,6 +70,24 @@ class AngelClient {
   private pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
   private agentsLoaded = false
   private loadedConversations = new Set<string>()
+
+  constructor() {
+    // Visibility-change reconnect: bypass throttled timers on mobile.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return
+        if (this.connState === 'reconnecting') {
+          this.clearReconnectTimer()
+          this.doConnect()
+        }
+      })
+    }
+    // Network up/down: the fastest possible signal, faster than any heartbeat.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('offline', () => this.handleOffline())
+      window.addEventListener('online', () => this.handleOnline())
+    }
+  }
 
   getConnState(): ConnState { return this.connState }
   getAgents(): AgentInfo[] { return this.agents }
@@ -275,18 +312,7 @@ class AngelClient {
 
       case 'msg:user': {
         const state = this.getConvState(msg.conversationId)
-        const confirmed: MessageRow = {
-          id: msg.messageId,
-          conversation_id: msg.conversationId,
-          role: 'user',
-          content: msg.content,
-          created_at: new Date().toISOString(),
-          tool_calls: null,
-          tool_call_id: null,
-          usage_input: null,
-          usage_output: null,
-          parts: null,
-        }
+        const confirmed = localMessage(msg.conversationId, 'user', msg.content, { id: msg.messageId })
         const optIdx = state.messages.findIndex(m => m.id < 0 && m.role === 'user')
         if (optIdx >= 0) {
           state.messages = [...state.messages]
@@ -362,18 +388,11 @@ class AngelClient {
         const parts = state.streamParts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined))
         const text = parts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
         if (parts.length > 0) {
-          state.messages = [...state.messages, {
-            id: nextMsgKey--,
-            conversation_id: msg.conversationId,
-            role: 'assistant',
-            content: text,
-            created_at: new Date().toISOString(),
-            tool_calls: null,
-            tool_call_id: null,
+          state.messages = [...state.messages, localMessage(msg.conversationId, 'assistant', text, {
             usage_input: msg.usage?.input ?? null,
             usage_output: msg.usage?.output ?? null,
             parts: JSON.stringify(parts), // keep tools where they were used
-          }]
+          })]
         }
         state.streamState = 'idle'
         state.streamParts = []
@@ -443,18 +462,10 @@ class AngelClient {
         const text = parts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
         if (parts.length > 0) {
           parts.push({ type: 'text', content: `\n\n*Error: ${msg.message}*` })
-          state.messages = [...state.messages, {
-            id: nextMsgKey--,
-            conversation_id: msg.conversationId,
-            role: 'assistant',
-            content: text + `\n\n*Error: ${msg.message}*`,
-            created_at: new Date().toISOString(),
-            tool_calls: null,
-            tool_call_id: null,
-            usage_input: null,
-            usage_output: null,
-            parts: JSON.stringify(parts),
-          }]
+          state.messages = [...state.messages, localMessage(
+            msg.conversationId, 'assistant', text + `\n\n*Error: ${msg.message}*`,
+            { parts: JSON.stringify(parts) },
+          )]
         }
         state.streamState = 'idle'
         state.streamParts = []
@@ -477,18 +488,7 @@ class AngelClient {
     const clientMsgId = crypto.randomUUID()
 
     const state = this.getConvState(conversationId)
-    state.messages = [...state.messages, {
-      id: nextMsgKey--,
-      conversation_id: conversationId,
-      role: 'user',
-      content,
-      created_at: new Date().toISOString(),
-      tool_calls: null,
-      tool_call_id: null,
-      usage_input: null,
-      usage_output: null,
-      parts: null,
-    }]
+    state.messages = [...state.messages, localMessage(conversationId, 'user', content)]
     state.streamState = 'streaming'
     state.streamParts = []
     state.streamSeq = 0
@@ -612,20 +612,3 @@ function rebuildPartsFromSnapshot(snapshot: StreamSnapshot): StreamPart[] {
 }
 
 export const angel = new AngelClient()
-
-// Visibility-change reconnect: bypass throttled timers on mobile
-if (typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return
-    if (angel.getConnState() === 'reconnecting') {
-      angel['clearReconnectTimer']()
-      angel['doConnect']()
-    }
-  })
-}
-
-// Network up/down: the fastest possible signal, faster than any heartbeat.
-if (typeof window !== 'undefined') {
-  window.addEventListener('offline', () => angel['handleOffline']())
-  window.addEventListener('online', () => angel['handleOnline']())
-}

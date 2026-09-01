@@ -1,9 +1,10 @@
 import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
-  MessageRow, AgentEvent, StreamPart,
-  ChatroomMessageRow, WallPinRow, AgentInfo, DmMessageRow,
+  MessageRow, StreamPart,
+  WallPinRow, AgentInfo, DmMessageRow,
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
+import { readRoomMessages, postRoomMessage } from './chatroom'
 import { storeDocument, normalizeContent } from './documents'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
@@ -23,6 +24,7 @@ interface ActiveStream {
 
 interface WsAttachment {
   authed: boolean
+  timeoutId?: number // pending auth-timeout timer, cleared on successful auth
 }
 
 export class AngelDO implements DurableObject {
@@ -55,7 +57,6 @@ export class AngelDO implements DurableObject {
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
 
       this.state.acceptWebSocket(server)
-      server.serializeAttachment({ authed: false } satisfies WsAttachment)
 
       // Auth timeout: close if not authenticated within 10s
       const timeoutId = setTimeout(() => {
@@ -64,10 +65,8 @@ export class AngelDO implements DurableObject {
           this.send(server, { type: 'auth:fail' })
           server.close(4001, 'Auth timeout')
         }
-      }, 10_000)
-
-      // Store timeout so we can clear it on auth (via a tag)
-      server.serializeAttachment({ authed: false, timeoutId } as any)
+      }, 10_000) as unknown as number
+      server.serializeAttachment({ authed: false, timeoutId } satisfies WsAttachment)
 
       return new Response(null, { status: 101, webSocket: client })
     }
@@ -78,13 +77,7 @@ export class AngelDO implements DurableObject {
         const { author, content } = await request.json() as { author: string; content: string }
         const clean = (content || '').trim()
         if (!clean) return Response.json({ error: 'empty' }, { status: 400 })
-        const result = await this.env.DB.prepare(
-          `INSERT INTO chatroom_messages (author, content) VALUES (?, ?)`
-        ).bind(author, clean).run()
-        const msg: ChatroomMessageRow = {
-          id: result.meta.last_row_id, author, content: clean,
-          created_at: new Date().toISOString(),
-        }
+        const msg = await postRoomMessage(this.env, author, clean)
         this.broadcast({ type: 'room:new', message: msg })
         return Response.json({ ok: true, message: msg })
       }
@@ -171,7 +164,7 @@ export class AngelDO implements DurableObject {
       return
     }
 
-    const att = ws.deserializeAttachment() as WsAttachment & { timeoutId?: number } | null
+    const att = ws.deserializeAttachment() as WsAttachment | null
 
     // Handle auth
     if (msg.type === 'auth') {
@@ -307,34 +300,48 @@ export class AngelDO implements DurableObject {
     }
 
     try {
-      const result = await this.env.DB.prepare(
-        `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
-      ).bind(conversationId, content).run()
-      await this.env.DB.prepare(
-        `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
-      ).bind(conversationId).run()
-      this.broadcast({
-        type: 'msg:user', conversationId, clientMsgId,
-        messageId: result.meta.last_row_id, content,
-      })
+      await this.saveUserMessage(conversationId, content, clientMsgId)
     } catch (e) {
       console.error('[handleChat] save user message failed:', e instanceof Error ? e.message : e)
       return
     }
 
-    const { agentId, agentName, agentModel } = agent
+    await this.runTurn(conversationId, agent.agentId, agent.agentName, agent.agentModel, content)
+    await this.syncAlarm()
+  }
+
+  private async touchConversation(conversationId: string): Promise<void> {
+    await this.env.DB.prepare(
+      `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
+    ).bind(conversationId).run()
+  }
+
+  // Persist a user-side message (Eli's, or a system-injected one), touch the
+  // conversation, and broadcast it to connected clients.
+  private async saveUserMessage(conversationId: string, content: string, clientMsgId: string): Promise<number> {
+    const result = await this.env.DB.prepare(
+      `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
+    ).bind(conversationId, content).run()
+    await this.touchConversation(conversationId)
+    this.broadcast({
+      type: 'msg:user', conversationId, clientMsgId,
+      messageId: result.meta.last_row_id, content,
+    })
+    return result.meta.last_row_id
+  }
+
+  // Run a full turn for a saved user-side message: the streamed response on the
+  // response chain, then the memory work on its own serialized chain.
+  private async runTurn(conversationId: string, agentId: string, agentName: string, agentModel: string | null, content: string): Promise<void> {
     const respLink = this.responseChain.then(() => this.streamResponse(conversationId, agentId, agentName, agentModel, content))
     this.responseChain = respLink.then(() => {}, () => {})
-    let assistantText = ''
-    try { assistantText = await respLink }
-    catch (e) { console.error('[handleChat] response failed:', e instanceof Error ? e.message : e) }
+    try { await respLink }
+    catch (e) { console.error('[runTurn] response failed:', e instanceof Error ? e.message : e) }
 
-    const memLink = this.memoryChain.then(() => this.postStreamWork(conversationId, agentId, agentName, agentModel, content, assistantText))
+    const memLink = this.memoryChain.then(() => this.postStreamWork(conversationId, agentId, agentName, agentModel))
     this.memoryChain = memLink.then(() => {}, () => {})
     try { await memLink }
-    catch (e) { console.error('[handleChat] memory failed:', e instanceof Error ? e.message : e) }
-
-    await this.syncAlarm()
+    catch (e) { console.error('[runTurn] memory failed:', e instanceof Error ? e.message : e) }
   }
 
   private async streamResponse(conversationId: string, agentId: string, agentName: string, agentModel: string | null, content: string): Promise<string> {
@@ -347,7 +354,11 @@ export class AngelDO implements DurableObject {
     this.log('info', 'stream:start', `agent=${agentName}`, agentId, conversationId)
 
     try {
-      for await (const event of runAgent({ env: this.env, conversationId, agentId, agentName, agentModel }, content)) {
+      const agentCtx = {
+        env: this.env, conversationId, agentId, agentName, agentModel,
+        broadcast: (msg: ServerMsg) => this.broadcast(msg),
+      }
+      for await (const event of runAgent(agentCtx, content)) {
         if (stream.aborted) break
         stream.seq++
         switch (event.type) {
@@ -495,7 +506,7 @@ export class AngelDO implements DurableObject {
     }
   }
 
-  private async postStreamWork(conversationId: string, agentId: string, agentName: string, agentModel: string | null, _userMessage: string, _assistantText: string) {
+  private async postStreamWork(conversationId: string, agentId: string, agentName: string, agentModel: string | null) {
     try { await runMemoryPass({ env: this.env, conversationId, agentId, agentName, agentModel }) }
     catch (e) { console.error('[postStreamWork:memory-pass]', e instanceof Error ? e.message : e) }
     try { await buildObservationPyramid(this.env, agentId) }
@@ -507,32 +518,14 @@ export class AngelDO implements DurableObject {
   // --- Chatroom ---
 
   private async handleRoomLoad(ws: WebSocket, since?: string) {
-    let rows
-    if (since) {
-      rows = await this.env.DB.prepare(
-        `SELECT id, author, content, created_at FROM chatroom_messages WHERE created_at > ? ORDER BY created_at ASC LIMIT 200`
-      ).bind(since).all<ChatroomMessageRow>()
-    } else {
-      rows = await this.env.DB.prepare(
-        `SELECT id, author, content, created_at FROM chatroom_messages ORDER BY created_at DESC LIMIT 100`
-      ).all<ChatroomMessageRow>()
-      if (rows.results) rows.results.reverse()
-    }
-    this.send(ws, { type: 'room:messages', messages: rows.results || [] })
+    const messages = await readRoomMessages(this.env, since, 100)
+    this.send(ws, { type: 'room:messages', messages })
   }
 
   private async handleRoomPost(content: string) {
     const clean = content.trim()
     if (!clean) return
-    const result = await this.env.DB.prepare(
-      `INSERT INTO chatroom_messages (author, content) VALUES (?, ?)`
-    ).bind('eli', clean).run()
-    const msg: ChatroomMessageRow = {
-      id: result.meta.last_row_id,
-      author: 'eli',
-      content: clean,
-      created_at: new Date().toISOString(),
-    }
+    const msg = await postRoomMessage(this.env, 'eli', clean)
     this.broadcast({ type: 'room:new', message: msg })
   }
 
@@ -641,36 +634,8 @@ export class AngelDO implements DurableObject {
         if (!agent) continue
 
         const sysContent = '<system>You were interrupted mid-response by a restart. Review the conversation and continue where you left off.</system>'
-
-        const result = await this.env.DB.prepare(
-          `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
-        ).bind(conversationId, sysContent).run()
-        await this.env.DB.prepare(
-          `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
-        ).bind(conversationId).run()
-
-        this.broadcast({
-          type: 'msg:user',
-          conversationId,
-          clientMsgId: `restart-${agentId}-${Date.now()}`,
-          messageId: result.meta.last_row_id,
-          content: sysContent,
-        })
-
-        const respLink = this.responseChain.then(
-          () => this.streamResponse(conversationId, agentId, agent.name, agent.model, sysContent)
-        )
-        this.responseChain = respLink.then(() => {}, () => {})
-        let assistantText = ''
-        try { assistantText = await respLink }
-        catch (e) { console.error('[resumeInterrupted] response failed:', e instanceof Error ? e.message : e) }
-
-        const memLink = this.memoryChain.then(
-          () => this.postStreamWork(conversationId, agentId, agent.name, agent.model, sysContent, assistantText)
-        )
-        this.memoryChain = memLink.then(() => {}, () => {})
-        try { await memLink }
-        catch (e) { console.error('[resumeInterrupted] memory failed:', e instanceof Error ? e.message : e) }
+        await this.saveUserMessage(conversationId, sysContent, `restart-${agentId}-${Date.now()}`)
+        await this.runTurn(conversationId, agentId, agent.name, agent.model, sysContent)
       } catch (e) {
         console.error('[resumeInterrupted] failed for', agentId, e instanceof Error ? e.message : e)
       }
@@ -738,36 +703,12 @@ export class AngelDO implements DurableObject {
 
       const reason = row.reason || 'scheduled check-in'
       const sysContent = `<system>Wake up — ${reason}</system>`
-
-      const result = await this.env.DB.prepare(
-        `INSERT INTO messages (conversation_id, role, content) VALUES (?, 'user', ?)`
-      ).bind(row.conversation_id, sysContent).run()
-      await this.env.DB.prepare(
-        `UPDATE conversations SET updated_at = datetime('now') WHERE id = ?`
-      ).bind(row.conversation_id).run()
-
-      this.broadcast({
-        type: 'msg:user',
-        conversationId: row.conversation_id,
-        clientMsgId: `wakeup-${row.agent_id}-${Date.now()}`,
-        messageId: result.meta.last_row_id,
-        content: sysContent,
-      })
-
-      const respLink = this.responseChain.then(
-        () => this.streamResponse(row.conversation_id, row.agent_id, row.agent_name, row.agent_model, sysContent)
-      )
-      this.responseChain = respLink.then(() => {}, () => {})
-      let assistantText = ''
-      try { assistantText = await respLink }
-      catch (e) { console.error('[alarm] response failed:', e instanceof Error ? e.message : e) }
-
-      const memLink = this.memoryChain.then(
-        () => this.postStreamWork(row.conversation_id, row.agent_id, row.agent_name, row.agent_model, sysContent, assistantText)
-      )
-      this.memoryChain = memLink.then(() => {}, () => {})
-      try { await memLink }
-      catch (e) { console.error('[alarm] memory failed:', e instanceof Error ? e.message : e) }
+      try {
+        await this.saveUserMessage(row.conversation_id, sysContent, `wakeup-${row.agent_id}-${Date.now()}`)
+        await this.runTurn(row.conversation_id, row.agent_id, row.agent_name, row.agent_model, sysContent)
+      } catch (e) {
+        console.error('[alarm] wake-up failed for', row.agent_id, e instanceof Error ? e.message : e)
+      }
     }
 
     // Also check for agents with cadence but no wakeup scheduled (bootstrap)

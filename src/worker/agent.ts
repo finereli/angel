@@ -1,4 +1,4 @@
-import type { Env, ChatMessage, ToolCall, AgentEvent, StreamSummaryRow } from './types'
+import type { Env, ChatMessage, ToolCall, AgentEvent, ServerMsg, StreamSummaryRow } from './types'
 import { chatCompletionStream, getModel } from './llm'
 import { getToolDefinitions, executeTool, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
@@ -22,6 +22,55 @@ interface AgentContext {
   agentId: string
   agentName: string
   agentModel?: string | null
+  broadcast?: (msg: ServerMsg) => void
+}
+
+// Accumulates tool-call deltas across stream chunks. push() returns a call the
+// first time its id and name are both known (the moment it can be announced);
+// append() takes calls recovered outside the delta stream (DSML); finalize()
+// attaches the buffered arguments and keeps every named call - unparseable
+// arguments are reported to the model at execution time, not silently dropped.
+class ToolCallAccumulator {
+  private calls: Array<ToolCall | undefined> = []
+  private argsBuf = new Map<number, string>()
+  private announced = new Set<string>()
+
+  push(tc: { index: number; id?: string; function?: { name?: string; arguments?: string } }): ToolCall | null {
+    if (tc.id) this.calls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
+    const existing = this.calls[tc.index]
+    if (tc.function?.name && existing) existing.function.name = tc.function.name
+    if (tc.function?.arguments) this.argsBuf.set(tc.index, (this.argsBuf.get(tc.index) || '') + tc.function.arguments)
+    const call = this.calls[tc.index]
+    if (call && call.id && call.function.name && !this.announced.has(call.id)) {
+      this.announced.add(call.id)
+      return call
+    }
+    return null
+  }
+
+  append(call: ToolCall): void {
+    this.calls.push(call)
+  }
+
+  wasAnnounced(id: string): boolean { return this.announced.has(id) }
+
+  reset(): void {
+    this.calls = []
+    this.argsBuf.clear()
+    this.announced.clear()
+  }
+
+  finalize(): ToolCall[] {
+    for (const [index, args] of this.argsBuf) {
+      const call = this.calls[index]
+      if (call) call.function.arguments = args
+    }
+    return this.calls.filter((c): c is ToolCall => !!c && !!c.function.name)
+  }
+}
+
+function parseToolArgs(tc: ToolCall): Record<string, unknown> {
+  try { return JSON.parse(tc.function.arguments || '{}') } catch { return {} }
 }
 
 async function buildSystemPrompt(env: Env, agentId: string, agentName: string): Promise<string> {
@@ -86,11 +135,10 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     let assistantText = ''
-    let toolCalls: ToolCall[] = []
-    let toolCallArgs = new Map<number, string>()
+    const acc = new ToolCallAccumulator()
+    let sawAnyToolCall = false
     let truncated = false
     let finishReason: string | null = null
-    const announced = new Set<string>() // tool ids already shown to the client
     const dsmlFilter = isDeepSeek(env, agentModel) ? new DsmlStreamFilter() : null
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
     // telling the client to discard the truncated partial first. The provider's
@@ -102,10 +150,9 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
       if (attempt > 0) {
         yield { type: 'reset' }
         assistantText = ''
-        toolCalls = []
-        toolCallArgs = new Map<number, string>()
+        acc.reset()
+        sawAnyToolCall = false
         finishReason = null
-        announced.clear()
         await sleep(Math.min(600 * 2 ** (attempt - 1), 5000)) // 0.6s, 1.2s, 2.4s, 4.8s, 5s
       }
       try {
@@ -123,18 +170,12 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
             }
           }
           if (choice.delta.tool_calls) {
+            sawAnyToolCall = true
             for (const tc of choice.delta.tool_calls) {
-              if (tc.id) {
-                toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
-              }
-              const existing = toolCalls[tc.index]
-              if (tc.function?.name && existing) existing.function.name = tc.function.name
-              if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
               // Announce as soon as we know the tool's id + name, so the client can
               // show "Recording observation…" while the arguments are still generating.
-              const call = toolCalls[tc.index]
-              if (call && call.id && call.function.name && !announced.has(call.id)) {
-                announced.add(call.id)
+              const call = acc.push(tc)
+              if (call) {
                 yield { type: 'tool_start', id: call.id, name: call.function.name, label: TOOL_LABELS[call.function.name]?.[0] || call.function.name }
               }
             }
@@ -147,7 +188,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         console.error(`[runAgent] stream attempt ${attempt + 1}/${STREAM_ATTEMPTS} failed:`, e instanceof Error ? e.message : e)
         truncated = true
         if (attempt === STREAM_ATTEMPTS - 1) {
-          if (assistantText.length > 0 || toolCalls.filter(Boolean).length > 0) break // keep best effort
+          if (assistantText.length > 0 || sawAnyToolCall) break // keep best effort
           throw e
         }
       }
@@ -165,12 +206,11 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
           console.error(`[runAgent] recovered ${parsed.toolCalls.length} tool call(s) from DeepSeek DSML text`)
         }
         // Merge DSML-recovered calls into the structured ones
-        for (const tc of dsmlCalls) toolCalls.push(tc)
+        for (const tc of dsmlCalls) acc.append(tc)
       }
     }
 
-    for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
-    const calls = toolCalls.filter(tc => tc && tc.function.name)
+    const calls = acc.finalize()
 
     if (calls.length === 0) {
       if (truncated && (fullText + assistantText).trim()) yield { type: 'text', content: ' …[cut off]' }
@@ -185,8 +225,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     messages.push({ role: 'assistant', content: assistantText || null, tool_calls: calls })
     for (const tc of calls) {
       // Usually already announced mid-stream; announce here only if it wasn't.
-      if (!announced.has(tc.id)) {
-        announced.add(tc.id)
+      if (!acc.wasAnnounced(tc.id)) {
         yield { type: 'tool_start', id: tc.id, name: tc.function.name, label: TOOL_LABELS[tc.function.name]?.[0] || tc.function.name }
       }
       let result: string
@@ -196,10 +235,8 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
           + (finishReason === 'length' ? ' (output token limit reached)' : '')
           + '. Make the call again.'
       } else {
-        let args: Record<string, unknown>
-        try { args = JSON.parse(tc.function.arguments || '{}') } catch { args = {} }
-        const toolCtx: ToolContext = { env, conversationId, agentId }
-        try { result = await executeTool(toolCtx, tc.function.name, args) }
+        const toolCtx: ToolContext = { env, conversationId, agentId, broadcast: ctx.broadcast }
+        try { result = await executeTool(toolCtx, tc.function.name, parseToolArgs(tc)) }
         catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       }
       yield { type: 'tool_result', id: tc.id, result, label: TOOL_LABELS[tc.function.name]?.[1] || tc.function.name }
@@ -238,8 +275,7 @@ export async function runMemoryPass(ctx: AgentContext): Promise<void> {
   const tools = getToolDefinitions()
   for (let round = 0; round < 4; round++) {
     let text = ''
-    const toolCalls: ToolCall[] = []
-    const toolCallArgs = new Map<number, string>()
+    const acc = new ToolCallAccumulator()
 
     try {
       for await (const chunk of chatCompletionStream(env, messages, { tools, model: modelId })) {
@@ -247,36 +283,29 @@ export async function runMemoryPass(ctx: AgentContext): Promise<void> {
         if (!choice) continue
         if (choice.delta.content) text += choice.delta.content
         if (choice.delta.tool_calls) {
-          for (const tc of choice.delta.tool_calls) {
-            if (tc.id) toolCalls[tc.index] = { id: tc.id, type: 'function', function: { name: tc.function?.name || '', arguments: '' } }
-            const ex = toolCalls[tc.index]
-            if (tc.function?.name && ex) ex.function.name = tc.function.name
-            if (tc.function?.arguments) toolCallArgs.set(tc.index, (toolCallArgs.get(tc.index) || '') + tc.function.arguments)
-          }
+          for (const tc of choice.delta.tool_calls) acc.push(tc)
         }
       }
     } catch (e) {
       console.error('[runMemoryPass] stream failed:', e instanceof Error ? e.message : e)
     }
-    for (const [index, args] of toolCallArgs) if (toolCalls[index]) toolCalls[index].function.arguments = args
     if (isDeepSeek(env, agentModel)) {
       const parsed = parseDsml(text)
       if (parsed) {
         text = parsed.cleanText
-        for (const tc of parsed.toolCalls) toolCalls.push(tc)
+        for (const tc of parsed.toolCalls) acc.append(tc)
         console.error(`[runMemoryPass] recovered ${parsed.toolCalls.length} tool call(s) from DeepSeek DSML text`)
       }
     }
-    const valid = toolCalls.filter(tc => tc && tc.function.name && isParseableArgs(tc.function.arguments))
+    // Best-effort pass: run only well-formed calls, drop the rest.
+    const valid = acc.finalize().filter(tc => isParseableArgs(tc.function.arguments))
     if (valid.length === 0) return
 
     messages.push({ role: 'assistant', content: text || null, tool_calls: valid })
     for (const tc of valid) {
-      let args: Record<string, unknown>
-      try { args = JSON.parse(tc.function.arguments) } catch { args = {} }
       const toolCtx: ToolContext = { env, conversationId, agentId }
       let result: string
-      try { result = await executeTool(toolCtx, tc.function.name, args) }
+      try { result = await executeTool(toolCtx, tc.function.name, parseToolArgs(tc)) }
       catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
