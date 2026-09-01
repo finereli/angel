@@ -15,6 +15,7 @@ import { agentTools } from './agents'
 import { x402Tools } from './x402'
 import { trackerTools } from './tracker'
 import { dmTools } from './dm'
+import { githubTools } from './github'
 
 export interface ToolContext {
   env: Env
@@ -45,6 +46,7 @@ const ALL_TOOLS: Tool[] = [
   ...x402Tools,
   ...trackerTools,
   ...dmTools,
+  ...githubTools,
 ]
 
 const byName = new Map(ALL_TOOLS.map(t => [t.def.function.name, t]))

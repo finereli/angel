@@ -44,4 +44,6 @@ export const TOOL_LABELS: Record<string, [string, string]> = {
   list_services: ['Listing services', 'Listed services'],
   dm_read: ['Reading DMs', 'Read DMs'],
   dm_send: ['Sending DM', 'Sent DM'],
+  github_post_issue: ['Posting GitHub issue', 'Posted GitHub issue'],
+  github_post_comment: ['Posting GitHub comment', 'Posted GitHub comment'],
 }

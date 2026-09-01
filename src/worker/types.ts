@@ -11,6 +11,7 @@ export interface Env {
   CDP_API_KEY_ID?: string
   CDP_API_KEY_SECRET?: string
   CDP_WALLET_SECRET?: string
+  GITHUB_PAT?: string
 }
 
 // DB row types
