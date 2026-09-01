@@ -1,7 +1,8 @@
 {
   "name": "Angel",
   "short_name": "Angel",
-  "start_url": "/",
+  "start_url": "/chat",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#1e1e2e",
   "theme_color": "#6366f1",
