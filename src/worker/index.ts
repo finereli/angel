@@ -36,6 +36,13 @@ app.get('/ws', async (c) => {
 app.get('/api/health', (c) => c.json({ ok: true, name: 'Angel' }))
 app.get('/health', (c) => c.json({ ok: true, name: 'Angel' }))
 
+// Chat app — serve the SPA
+app.get('/chat', async (c) => {
+  const url = new URL(c.req.url)
+  url.pathname = '/index.html'
+  return c.env.ASSETS.fetch(url.toString())
+})
+
 // Pure HTML catalog page — no JS, no app shell. The x402 auditor flags
 // pages that look client-rendered (script tags, app div). This page is
 // static HTML only so crawlers see a real catalog.
