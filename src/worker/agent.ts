@@ -1,6 +1,6 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, ServerMsg, StreamSummaryRow } from './types'
 import { chatCompletionStream, getModel } from './llm'
-import { getToolDefinitions, executeTool, TOOL_LABELS, type ToolContext } from './tools/registry'
+import { getToolDefinitions, executeTool, toolDoneLabel, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble, buildPerMessageReminder } from './lists'
 import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
@@ -229,6 +229,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         yield { type: 'tool_start', id: tc.id, name: tc.function.name, label: TOOL_LABELS[tc.function.name]?.[0] || tc.function.name }
       }
       let result: string
+      let doneLabel = TOOL_LABELS[tc.function.name]?.[1] || tc.function.name
       if (!isParseableArgs(tc.function.arguments)) {
         console.error(`[runAgent] truncated tool call ${tc.function.name} (finish_reason=${finishReason})`)
         result = 'Error: this tool call was cut off before its arguments finished streaming'
@@ -236,10 +237,12 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
           + '. Make the call again.'
       } else {
         const toolCtx: ToolContext = { env, conversationId, agentId, broadcast: ctx.broadcast }
-        try { result = await executeTool(toolCtx, tc.function.name, parseToolArgs(tc)) }
+        const args = parseToolArgs(tc)
+        doneLabel = toolDoneLabel(tc.function.name, args)
+        try { result = await executeTool(toolCtx, tc.function.name, args) }
         catch (e) { result = `Error: ${e instanceof Error ? e.message : String(e)}` }
       }
-      yield { type: 'tool_result', id: tc.id, result, label: TOOL_LABELS[tc.function.name]?.[1] || tc.function.name }
+      yield { type: 'tool_result', id: tc.id, result, label: doneLabel }
       messages.push({ role: 'tool', content: result, tool_call_id: tc.id })
     }
   }

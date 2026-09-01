@@ -21,6 +21,8 @@ import { declareDiscoveryExtension, bazaarResourceServerExtension } from '@x402/
 import { CdpClient } from '@coinbase/cdp-sdk'
 
 export { AngelDO } from './durable-object'
+// The shared workspace container's Durable Object class (see worker/sandbox.ts).
+export { Sandbox } from '@cloudflare/sandbox'
 
 type AppContext = { Bindings: Env }
 const app = new Hono<AppContext>()

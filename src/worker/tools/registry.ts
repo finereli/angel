@@ -16,6 +16,7 @@ import { x402Tools } from './x402'
 import { trackerTools } from './tracker'
 import { dmTools } from './dm'
 import { githubTools } from './github'
+import { sandboxTools } from './sandbox'
 
 export interface ToolContext {
   env: Env
@@ -29,6 +30,9 @@ export interface ToolContext {
 export interface Tool {
   def: ToolDefinition
   label: [string, string] // [in-progress, done]
+  // Optional args-aware done label (e.g. "Ran: npm test") shown in the stream
+  // instead of the static one - the visible log line of what actually happened.
+  doneLabel?: (args: Record<string, unknown>) => string
   run: (ctx: ToolContext, args: Record<string, unknown>) => Promise<string>
 }
 
@@ -50,6 +54,7 @@ const ALL_TOOLS: Tool[] = [
   ...trackerTools,
   ...dmTools,
   ...githubTools,
+  ...sandboxTools,
 ]
 
 const byName = new Map(ALL_TOOLS.map(t => [t.def.function.name, t]))
@@ -69,4 +74,10 @@ export async function executeTool(
   const tool = byName.get(name)
   if (!tool) return `Unknown tool: ${name}`
   return tool.run(ctx, args)
+}
+
+export function toolDoneLabel(name: string, args: Record<string, unknown>): string {
+  const tool = byName.get(name)
+  if (!tool) return name
+  try { return tool.doneLabel?.(args) || tool.label[1] } catch { return tool.label[1] }
 }

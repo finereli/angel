@@ -1,8 +1,11 @@
+import type { Sandbox } from '@cloudflare/sandbox'
+
 export interface Env {
   DB: D1Database
   AI: Ai
   ASSETS: Fetcher
   ANGEL_DO: DurableObjectNamespace
+  Sandbox: DurableObjectNamespace<Sandbox>
   PIN: string
   OPENROUTER_API_KEY: string
   DEEPSEEK_MODEL?: string
