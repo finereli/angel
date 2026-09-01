@@ -79,6 +79,54 @@ export const sandboxTools: Tool[] = [
     def: {
       type: 'function',
       function: {
+        name: 'workspace_edit',
+        description:
+          'Edit a file in the shared workspace by replacing an exact snippet of its current text. ' +
+          'old_string must match the file exactly - same whitespace, same line breaks - and match exactly once ' +
+          '(include a line or two of surrounding context to make it unique, or set replace_all to change every occurrence). ' +
+          'If unsure of the exact text, read the file first. For a new file or a full rewrite use workspace_write instead.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File path (relative to the workspace, or absolute)' },
+            old_string: { type: 'string', description: 'The exact text to replace, copied from the file' },
+            new_string: { type: 'string', description: 'The replacement text' },
+            replace_all: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match (default false)' },
+          },
+          required: ['path', 'old_string', 'new_string'],
+        },
+      },
+    },
+    label: ['Editing a workspace file', 'Edited a workspace file'],
+    doneLabel: args => `Edited ${String(args.path || '').slice(0, 64)}`,
+    run: async (ctx, args) => {
+      const path = resolveWorkspacePath(args.path as string)
+      const oldStr = args.old_string as string
+      const newStr = args.new_string as string
+      if (!oldStr) return 'Error: old_string is empty. To create or rewrite a file, use workspace_write.'
+      if (oldStr === newStr) return 'Error: old_string and new_string are identical.'
+      const sandbox = roomSandbox(ctx.env)
+      const file = await sandbox.readFile(path)
+      if (file.isBinary) return `Error: ${path} is a binary file.`
+      const count = file.content.split(oldStr).length - 1
+      if (count === 0) {
+        return `Error: old_string not found in ${path}. It must match the file's current text exactly, including whitespace and line breaks - read the file and copy the snippet verbatim.`
+      }
+      if (count > 1 && !args.replace_all) {
+        return `Error: old_string appears ${count} times in ${path}. Include surrounding lines to make it unique, or set replace_all: true to change every occurrence.`
+      }
+      const updated = args.replace_all
+        ? file.content.split(oldStr).join(newStr)
+        : file.content.replace(oldStr, newStr)
+      await sandbox.writeFile(path, updated)
+      const n = args.replace_all ? count : 1
+      return `Edited ${path}: replaced ${n} occurrence${n === 1 ? '' : 's'}.`
+    },
+  },
+  {
+    def: {
+      type: 'function',
+      function: {
         name: 'workspace_write',
         description:
           'Write a text file in the shared workspace (creates parent directories, overwrites if it exists). ' +
