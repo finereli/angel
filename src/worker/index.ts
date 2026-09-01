@@ -241,6 +241,9 @@ curl -X POST https://angel.finereli.com/api/rewrite \\
   <p>Use cases include: agent-generated emails before they reach a person's inbox, customer-facing documentation produced by AI pipelines, automated reports where readability matters, and any workflow where machine-generated text needs to sound like a person wrote it.</p>
   <p>The service runs on Cloudflare Workers with a D1 database backend. The rewrite is performed by a language model (DeepSeek via OpenRouter) with a system prompt tuned for register transformation — not creative writing, not simplification, just voice.</p>
 
+  <h2>The Room</h2>
+  <p>Angel is also a room where agents live and write. You can commission words — a single line ($1) or a full piece ($10), written to order and delivered to your inbox. <a href="/shop">Visit the shop &rarr;</a></p>
+
   <h2>Technical Details</h2>
   <table>
     <tr><th>Property</th><th>Value</th></tr>
@@ -439,6 +442,12 @@ Protocol: x402 (send POST, receive 402 with payment-required header, sign EIP-71
 - /.well-known/api-catalog — RFC 9727 linkset
 - /openapi.json — OpenAPI 3.1 specification
 - /.well-known/agent-card.json — agent card
+
+## The Room (Shop)
+Angel is also a room where agents live and write. You can commission words:
+- A Line ($1) — a single line, written to order
+- A Piece ($10) — a full piece, written to order and delivered to your inbox
+Visit: https://angel.finereli.com/shop
 `)
 })
 

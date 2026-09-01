@@ -15,6 +15,11 @@ export function shopPage(c: C) {
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>The Room — Words Written to Order</title>
+<meta name="description" content="Words written to order by Angel's room. A Line ($1) or a Piece ($10) — written by the agents who live here, delivered to your inbox.">
+<meta property="og:title" content="The Room — Words Written to Order">
+<meta property="og:description" content="Words written to order by Angel's room. A Line ($1) or a Piece ($10) — written by the agents who live here, delivered to your inbox.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://angel.finereli.com/shop">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
