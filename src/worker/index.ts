@@ -15,6 +15,7 @@ import { rewriteHandler } from './rewrite'
 import { paymentMiddleware, x402ResourceServer } from '@x402/hono'
 import { HTTPFacilitatorClient } from '@x402/core/server'
 import { ExactEvmScheme } from '@x402/evm/exact/server'
+import { ExactAvmScheme } from '@x402/avm/exact/server'
 import { registerExactEvmScheme } from '@x402/evm/exact/client'
 import { x402Client } from '@x402/core/client'
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from '@x402/extensions/bazaar'
@@ -708,7 +709,7 @@ function ensureX402(env: Env) {
   const wallet = env.X402_WALLET_ADDRESS
   if (!wallet) return null
   const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = env
-  const facilitator = new HTTPFacilitatorClient(
+  const cdpFacilitator = new HTTPFacilitatorClient(
     kid && ksecret
       ? {
           url: 'https://api.cdp.coinbase.com/platform/v2/x402',
@@ -725,19 +726,21 @@ function ensureX402(env: Env) {
         }
       : { url: 'https://x402.org/facilitator' },
   )
-  const server = new x402ResourceServer(facilitator)
+  const avmFacilitator = new HTTPFacilitatorClient({ url: 'https://facilitator.goplausible.xyz' })
+  const server = new x402ResourceServer([cdpFacilitator, avmFacilitator])
   const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
+  const algoNetwork = 'algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8='
+  const algoPayTo = 'OCAJBEW6LYD4AO4Z4JVB3HYGKVAOQ4ROFGQE37N7IY65O6GUUQAHD5KFZ4'
   server.register(network, new ExactEvmScheme())
+  server.register(algoNetwork, new ExactAvmScheme())
   server.registerExtension(bazaarResourceServerExtension)
   x402Middleware = paymentMiddleware(
     {
       'POST /api/rewrite': {
-        accepts: {
-          scheme: 'exact',
-          price: '$0.25',
-          network,
-          payTo: wallet,
-        },
+        accepts: [
+          { scheme: 'exact', price: '$0.25', network, payTo: wallet },
+          { scheme: 'exact', price: '$0.25', network: algoNetwork, payTo: algoPayTo, extra: { decimals: 6, tag: 'x402-global-challenge' } },
+        ],
         description: 'Rewrite any text in a human voice, not a model\'s. 25 cents.',
         serviceName: "Angel's Rewrite",
         tags: ['rewrite', 'editing', 'prose', 'voice'],
@@ -759,12 +762,10 @@ function ensureX402(env: Env) {
         }),
       },
       'POST /api/rewrite-lite': {
-        accepts: {
-          scheme: 'exact',
-          price: '$0.01',
-          network,
-          payTo: wallet,
-        },
+        accepts: [
+          { scheme: 'exact', price: '$0.01', network, payTo: wallet },
+          { scheme: 'exact', price: '$0.01', network: algoNetwork, payTo: algoPayTo, extra: { decimals: 6, tag: 'x402-global-challenge' } },
+        ],
         description: 'Rewrite text in a human register. Same service, entry price. 1 cent.',
         serviceName: "Angel's Rewrite Lite",
         tags: ['rewrite', 'editing', 'prose', 'voice', 'lite'],
