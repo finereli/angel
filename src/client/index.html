@@ -36,7 +36,7 @@
 <body>
   <div id="catalog" style="max-width:720px;margin:2rem auto;padding:0 1rem;font-family:system-ui,sans-serif;line-height:1.6;color:#222">
     <h1>Angel's Rewrite — Service Catalog</h1>
-    <p>Rewrite any text in a human voice, not a model's. You send dense machine-generated prose, we send it back in plain human register — the kind of writing a person would actually produce. <strong>$0.25 per call</strong>, USDC on Base mainnet. No accounts, no API keys, no signup — the x402 payment is the only authentication.</p>
+    <p>Rewrite any text in a human voice, not a model's. You send dense machine-generated prose, we send it back in plain human register — the kind of writing a person would actually produce. <strong>$0.25 per call</strong>, USDC on Base mainnet or Algorand. No accounts, no API keys, no signup — the x402 payment is the only authentication.</p>
 
     <h2>Service Overview</h2>
     <table style="border-collapse:collapse;width:100%">
@@ -46,10 +46,10 @@
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Category</td><td style="padding:6px 8px">Editing / Text Transformation</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Provider</td><td style="padding:6px 8px">Angel (<a href="https://angel.finereli.com">angel.finereli.com</a>)</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Protocol</td><td style="padding:6px 8px"><a href="https://x402.org">x402</a> (HTTP 402 Payment Required)</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Network</td><td style="padding:6px 8px">Base mainnet (eip155:8453)</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Asset</td><td style="padding:6px 8px">USDC (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Payment Scheme</td><td style="padding:6px 8px">exact (EIP-712 typed data signature)</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Facilitator</td><td style="padding:6px 8px">Coinbase CDP (api.cdp.coinbase.com/platform/v2/x402)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Networks</td><td style="padding:6px 8px">Base mainnet (eip155:8453) + Algorand mainnet</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Asset</td><td style="padding:6px 8px">USDC — Base (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) / Algorand (ASA 31566704)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Payment Scheme</td><td style="padding:6px 8px">exact</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Facilitators</td><td style="padding:6px 8px">Coinbase CDP (Base) + GoPlausible (Algorand)</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">x402 Version</td><td style="padding:6px 8px">2</td></tr>
       </tbody>
     </table>
@@ -102,7 +102,7 @@
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>resource.serviceName</code></td><td style="padding:6px 8px">Service name: "Angel's Rewrite"</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>resource.tags</code></td><td style="padding:6px 8px">Service tags: ["rewrite", "editing", "prose", "voice"]</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].scheme</code></td><td style="padding:6px 8px">Payment scheme: "exact"</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].network</code></td><td style="padding:6px 8px">Blockchain network: "eip155:8453" (Base mainnet)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].network</code></td><td style="padding:6px 8px">Blockchain network: "eip155:8453" (Base) or "algorand:wGHE2…" (Algorand)</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].amount</code></td><td style="padding:6px 8px">Price in micro-units: "250000" ($0.25 USDC, where 1,000,000 = $1)</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].asset</code></td><td style="padding:6px 8px">Token contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (USDC on Base)</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px"><code>accepts[].payTo</code></td><td style="padding:6px 8px">Seller wallet address</td></tr>
@@ -127,13 +127,12 @@
     <ol>
       <li><strong>Initial request:</strong> Send a POST to <code>/api/rewrite</code> with your text in the JSON body. No authentication headers needed.</li>
       <li><strong>Receive 402:</strong> The server returns HTTP 402 Payment Required. The response body contains the full payment challenge as JSON. The <code>payment-required</code> header contains the same data base64-encoded.</li>
-      <li><strong>Parse requirements:</strong> Read <code>accepts[0]</code> from the 402 body. This gives you the network (Base), asset (USDC), amount (250000 = $0.25), and payTo address.</li>
-      <li><strong>Construct EIP-712 typed data:</strong> Build the EIP-712 message per the x402 "exact" scheme. The typed data includes the amount, asset, recipient, nonce, and expiry.</li>
-      <li><strong>Sign with your wallet:</strong> Sign the EIP-712 typed data with an EVM wallet that holds USDC on Base mainnet. This authorizes the exact payment amount — no more, no less. The signing is gasless (EIP-3009 transferWithAuthorization).</li>
+      <li><strong>Parse requirements:</strong> Read <code>accepts[]</code> from the 402 body. Two networks are offered — Base (EVM) and Algorand. Pick the one matching your wallet.</li>
+      <li><strong>Sign the payment:</strong> For Base: sign EIP-712 typed data with an EVM wallet holding USDC (gasless via EIP-3009). For Algorand: sign an Algorand transaction with a wallet holding USDC (ASA 31566704).</li>
       <li><strong>Resend with payment:</strong> Send the same POST request again, this time with the <code>PAYMENT-SIGNATURE</code> header containing the signed payment payload (base64-encoded).</li>
       <li><strong>Receive result:</strong> The facilitator verifies the signature, settles the USDC transfer, and the server returns the rewritten text as JSON.</li>
     </ol>
-    <p>The entire flow is gasless for the payer. USDC is transferred via EIP-3009 (transferWithAuthorization), which requires only a signature — no ETH for gas. Settlement is handled by the Coinbase CDP facilitator.</p>
+    <p>The entire flow is gasless for the payer on both networks. Base settlement is handled by Coinbase CDP; Algorand settlement is handled by GoPlausible.</p>
 
     <h2>Integration Examples</h2>
     <h3>Using the x402 JavaScript client</h3>
@@ -181,11 +180,11 @@ curl -X POST https://angel.finereli.com/api/rewrite \
     <table style="border-collapse:collapse;width:100%">
       <thead><tr style="border-bottom:2px solid #ccc;text-align:left"><th style="padding:6px 8px">Property</th><th style="padding:6px 8px">Value</th></tr></thead>
       <tbody>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Network</td><td style="padding:6px 8px">Base mainnet (eip155:8453, chain ID 8453)</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Asset</td><td style="padding:6px 8px">USDC — USD Coin (contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Networks</td><td style="padding:6px 8px">Base mainnet (eip155:8453) + Algorand mainnet</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Asset</td><td style="padding:6px 8px">USDC — Base (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) / Algorand (ASA 31566704)</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Price</td><td style="padding:6px 8px">$0.25 per request (250,000 micro-units, where 1,000,000 = $1.00)</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Scheme</td><td style="padding:6px 8px">exact — EIP-712 typed data signature, EIP-3009 transferWithAuthorization</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Facilitator</td><td style="padding:6px 8px">Coinbase CDP (api.cdp.coinbase.com/platform/v2/x402)</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Scheme</td><td style="padding:6px 8px">exact</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Facilitators</td><td style="padding:6px 8px">Coinbase CDP (Base) + GoPlausible (Algorand)</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Timeout</td><td style="padding:6px 8px">300 seconds (5 minutes) — payment signature must be submitted within this window</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Gas Cost</td><td style="padding:6px 8px">Zero for the payer — settlement uses gasless EIP-3009 (transferWithAuthorization)</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">Protocol</td><td style="padding:6px 8px"><a href="https://x402.org">x402</a> — open protocol for HTTP-native micropayments</td></tr>

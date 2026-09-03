@@ -377,30 +377,42 @@ app.get('/.well-known/x402', (c) => {
   if (!wallet) return c.json({ error: 'x402 not configured' }, 503)
   const { CDP_API_KEY_ID: kid, CDP_API_KEY_SECRET: ksecret } = c.env
   const network = kid && ksecret ? 'eip155:8453' : 'eip155:84532'
+  const algoNetwork = 'algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8='
+  const algoPayTo = 'OCAJBEW6LYD4AO4Z4JVB3HYGKVAOQ4ROFGQE37N7IY65O6GUUQAHD5KFZ4'
+  const endpoint = (path: string, price: string) => ({
+    method: 'POST',
+    path,
+    price,
+    scheme: 'exact',
+    contentType: 'application/json',
+    input: {
+      text: { type: 'string', required: true, description: 'Dense machine-generated text to rewrite' },
+      voice: { type: 'string', required: false, description: "Optional. 'plain' (default)" },
+    },
+    output: {
+      rewritten: { type: 'string', description: 'The rewritten text' },
+    },
+    accepts: [
+      { scheme: 'exact', price, network, payTo: wallet },
+      { scheme: 'exact', price, network: algoNetwork, payTo: algoPayTo, extra: { decimals: 6, tag: 'x402-global-challenge' } },
+    ],
+  })
   return c.json({
     x402Version: 2,
     serviceName: "Angel's Rewrite",
     description: "Rewrite any text in a human voice, not a model's. 25 cents.",
-    network,
+    networks: [network, algoNetwork],
     payTo: wallet,
-    facilitator: kid && ksecret
-      ? 'https://api.cdp.coinbase.com/platform/v2/x402'
-      : 'https://x402.org/facilitator',
+    payToByNetwork: { [network]: wallet, [algoNetwork]: algoPayTo },
+    facilitators: [
+      kid && ksecret
+        ? 'https://api.cdp.coinbase.com/platform/v2/x402'
+        : 'https://x402.org/facilitator',
+      'https://facilitator.goplausible.xyz',
+    ],
     endpoints: [
-      {
-        method: 'POST',
-        path: '/api/rewrite',
-        price: '$0.25',
-        scheme: 'exact',
-        contentType: 'application/json',
-        input: {
-          text: { type: 'string', required: true, description: 'Dense machine-generated text to rewrite' },
-          voice: { type: 'string', required: false, description: "Optional. 'plain' (default)" },
-        },
-        output: {
-          rewritten: { type: 'string', description: 'The rewritten text' },
-        },
-      },
+      endpoint('/api/rewrite', '$0.25'),
+      endpoint('/api/rewrite-lite', '$0.01'),
     ],
   })
 })
@@ -425,13 +437,13 @@ Same rewrite service at entry price. Try the register before committing to the f
 Health check. Returns {"ok":true,"name":"Angel"}.
 
 ## Pricing
-$0.25 (flagship) or $0.01 (lite) per request, paid via x402 (USDC on Base mainnet)
+$0.25 (flagship) or $0.01 (lite) per request, paid via x402 (USDC on Base mainnet or Algorand mainnet)
 
 ## Payment
-Network: ${network}
-Pay to: ${wallet}
-Scheme: exact
-Protocol: x402 (send POST, receive 402 with payment-required header, sign EIP-712, resend with PAYMENT-SIGNATURE header)
+Both endpoints accept two networks:
+- Base (EVM): network ${network}, pay to ${wallet}, scheme exact, sign EIP-712
+- Algorand: network algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=, pay to OCAJBEW6LYD4AO4Z4JVB3HYGKVAOQ4ROFGQE37N7IY65O6GUUQAHD5KFZ4, scheme exact
+Protocol: x402 (send POST, receive 402 with payment-required header, sign and resend with PAYMENT-SIGNATURE header)
 
 ## Input (JSON, both endpoints)
 - text (string, required): Dense machine-generated text to rewrite in a human register.
@@ -463,7 +475,7 @@ app.get('/openapi.json', (c) => {
     info: {
       title: "Angel's Rewrite",
       version: '1.0.0',
-      description: "Rewrite any text in a human voice, not a model's. Paid via x402 ($0.25 USDC on Base).",
+      description: "Rewrite any text in a human voice, not a model's. Paid via x402 ($0.25 USDC on Base or Algorand).",
     },
     servers: [{ url: 'https://angel.finereli.com' }],
     paths: {
@@ -507,9 +519,11 @@ app.get('/openapi.json', (c) => {
           },
           'x-x402': {
             price: '$0.25',
-            network,
             scheme: 'exact',
-            payTo: wallet,
+            accepts: [
+              { network, payTo: wallet },
+              { network: 'algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=', payTo: 'OCAJBEW6LYD4AO4Z4JVB3HYGKVAOQ4ROFGQE37N7IY65O6GUUQAHD5KFZ4' },
+            ],
           },
         },
       },
@@ -553,9 +567,11 @@ app.get('/openapi.json', (c) => {
           },
           'x-x402': {
             price: '$0.01',
-            network,
             scheme: 'exact',
-            payTo: wallet,
+            accepts: [
+              { network, payTo: wallet },
+              { network: 'algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=', payTo: 'OCAJBEW6LYD4AO4Z4JVB3HYGKVAOQ4ROFGQE37N7IY65O6GUUQAHD5KFZ4' },
+            ],
           },
         },
       },
@@ -595,7 +611,7 @@ app.get('/.well-known/agent-card.json', (c) => {
     capabilities: {
       x402: {
         endpoints: ['POST /api/rewrite', 'POST /api/rewrite-lite'],
-        network: 'eip155:8453',
+        networks: ['eip155:8453', 'algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8='],
         pricing: '$0.01–$0.25 per request',
       },
     },
