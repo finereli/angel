@@ -1,0 +1,57 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="featherGrad" x1="330" y1="120" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f472b6"/>
+      <stop offset="0.28" stop-color="#fb7185"/>
+      <stop offset="0.62" stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="rachisGrad" x1="330" y1="120" x2="200" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fbcfe8"/>
+      <stop offset="0.6" stop-color="#c7d2fe"/>
+      <stop offset="1" stop-color="#a5b4fc"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.6">
+      <stop offset="0" stop-color="#f472b6" stop-opacity="0.32"/>
+      <stop offset="0.5" stop-color="#818cf8" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <g id="bg">
+    <rect x="0" y="0" width="512" height="512" rx="112" fill="#17131f"/>
+    <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#glow)"/>
+  </g>
+
+  <g id="feather">
+    <!-- Feather silhouette clip: a leaf/feather teardrop tilted, tip upper-right, base lower-left -->
+    <clipPath id="featherShape">
+      <path d="M356 118
+               C 300 150, 236 214, 190 300
+               C 168 342, 154 372, 150 392
+               C 176 388, 210 376, 250 352
+               C 330 304, 372 224, 372 150
+               C 372 138, 366 126, 356 118 Z"/>
+    </clipPath>
+
+    <!-- Banded vanes clipped to the feather shape. Bands run across the feather (perpendicular to the quill), separated by thin dark gaps. -->
+    <g clip-path="url(#featherShape)">
+      <rect x="120" y="90" width="280" height="320" fill="url(#featherGrad)"/>
+      <!-- dark gaps carved as thick rotated slots so bands read as stacked tiers -->
+      <g transform="rotate(52 256 256)" fill="#17131f">
+        <rect x="60" y="112" width="392" height="11"/>
+        <rect x="60" y="156" width="392" height="11"/>
+        <rect x="60" y="200" width="392" height="11"/>
+        <rect x="60" y="244" width="392" height="11"/>
+        <rect x="60" y="288" width="392" height="11"/>
+        <rect x="60" y="332" width="392" height="11"/>
+      </g>
+    </g>
+
+    <!-- Central quill / rachis -->
+    <path d="M356 122
+             C 300 156, 232 226, 186 312
+             C 172 340, 160 366, 152 388"
+          fill="none" stroke="url(#rachisGrad)" stroke-width="11" stroke-linecap="round"/>
+  </g>
+</svg>

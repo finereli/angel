@@ -1,0 +1,512 @@
+import type {
+  ClientMsg, ServerMsg, MessageRow, StreamSnapshot, StreamPart, AgentInfo,
+} from '../worker/types'
+
+export type { StreamPart }
+
+export type ConnState = 'disconnected' | 'connecting' | 'authenticating' | 'connected' | 'reconnecting'
+
+export type StreamState = 'idle' | 'streaming'
+
+export interface ConversationState {
+  messages: MessageRow[]
+  streamState: StreamState
+  streamParts: StreamPart[]
+  streamSeq: number
+  streamStartTime: number // ms epoch the current stream began; 0 when idle
+  error: string | null
+}
+
+type Listener = () => void
+// A document upload's resolution: its server-side id, or an error.
+export interface DocAdded {
+  conversationId: string
+  clientDocId: string
+  id?: string
+  title?: string
+  lineCount?: number
+  error?: string
+}
+type DocListener = (d: DocAdded) => void
+
+let nextMsgKey = -1
+
+// A locally-constructed message row (optimistic user echo, or an assistant reply
+// assembled from stream parts) with the DB-only fields nulled out.
+function localMessage(
+  conversationId: string, role: 'user' | 'assistant', content: string,
+  extra: Partial<MessageRow> = {},
+): MessageRow {
+  return {
+    id: nextMsgKey--,
+    conversation_id: conversationId,
+    role,
+    content,
+    created_at: new Date().toISOString(),
+    tool_calls: null,
+    tool_call_id: null,
+    usage_input: null,
+    usage_output: null,
+    parts: null,
+    ...extra,
+  }
+}
+
+class AngelClient {
+  private ws: WebSocket | null = null
+  private pin: string = ''
+  private connState: ConnState = 'disconnected'
+  private agent: AgentInfo | null = null
+  private convStates = new Map<string, ConversationState>()
+  private listeners = new Set<Listener>()
+  private docListeners = new Set<DocListener>()
+  private reconnectDelay = 1000
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private pingInterval: ReturnType<typeof setInterval> | null = null
+  private pongTimeout: ReturnType<typeof setTimeout> | null = null
+  private pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
+  private agentLoaded = false
+  private loadedConversations = new Set<string>()
+
+  constructor() {
+    // Visibility-change reconnect: bypass throttled timers on mobile.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return
+        if (this.connState === 'reconnecting') {
+          this.clearReconnectTimer()
+          this.doConnect()
+        }
+      })
+    }
+    // Network up/down: the fastest possible signal, faster than any heartbeat.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('offline', () => this.handleOffline())
+      window.addEventListener('online', () => this.handleOnline())
+    }
+  }
+
+  getConnState(): ConnState { return this.connState }
+  getAgent(): AgentInfo | null { return this.agent }
+  hasLoadedAgent(): boolean { return this.agentLoaded }
+
+  getConvState(id: string): ConversationState {
+    if (!this.convStates.has(id)) {
+      this.convStates.set(id, {
+        messages: [],
+        streamState: 'idle',
+        streamParts: [],
+        streamSeq: 0,
+        streamStartTime: 0,
+        error: null,
+      })
+    }
+    return this.convStates.get(id)!
+  }
+
+  subscribe(fn: Listener): () => void {
+    this.listeners.add(fn)
+    return () => this.listeners.delete(fn)
+  }
+
+  // A stored document resolved server-side (its real id is now known).
+  onDocAdded(fn: DocListener): () => void {
+    this.docListeners.add(fn)
+    return () => this.docListeners.delete(fn)
+  }
+
+  private notify() {
+    for (const fn of this.listeners) {
+      try { fn() } catch {}
+    }
+  }
+
+  connect(pin: string) {
+    this.pin = pin
+    this.doConnect()
+  }
+
+  disconnect() {
+    this.connState = 'disconnected'
+    this.stopPing()
+    this.clearReconnectTimer()
+    this.loadedConversations.clear()
+    if (this.ws) {
+      this.ws.close(1000, 'Client disconnect')
+      this.ws = null
+    }
+    this.notify()
+  }
+
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+  }
+
+  private doConnect() {
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
+    }
+
+    this.connState = 'connecting'
+    this.notify()
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    this.ws = new WebSocket(`${proto}//${location.host}/ws`)
+
+    this.ws.onopen = () => {
+      this.connState = 'authenticating'
+      this.notify()
+      this.send({ type: 'auth', pin: this.pin })
+    }
+
+    this.ws.onmessage = (event) => {
+      let msg: ServerMsg
+      try { msg = JSON.parse(event.data) } catch { return }
+      this.handleMessage(msg)
+    }
+
+    this.ws.onclose = () => {
+      this.stopPing()
+      this.loadedConversations.clear()
+      if (this.connState !== 'disconnected') {
+        this.connState = 'reconnecting'
+        this.notify()
+        this.clearReconnectTimer()
+        this.reconnectTimer = setTimeout(() => {
+          if (this.connState === 'reconnecting') {
+            this.doConnect()
+          }
+        }, this.reconnectDelay)
+        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000)
+      }
+    }
+
+    this.ws.onerror = () => {}
+  }
+
+  private handleMessage(msg: ServerMsg) {
+    switch (msg.type) {
+      case 'auth:ok': {
+        this.connState = 'connected'
+        this.reconnectDelay = 1000
+        this.startPing()
+        this.agent = msg.agent
+        this.agentLoaded = true
+        const activeIds = new Set(msg.activeStreams.map(s => s.conversationId))
+        const pendingIds = new Set(msg.pendingTurns || [])
+        for (const snapshot of msg.activeStreams) {
+          const state = this.getConvState(snapshot.conversationId)
+          state.streamState = 'streaming'
+          if (!state.streamStartTime) state.streamStartTime = Date.now()
+          state.streamParts = rebuildPartsFromSnapshot(snapshot)
+          state.streamSeq = snapshot.seq
+        }
+        // A queued turn hasn't streamed anything yet, but a reply is coming:
+        // show it as streaming-with-no-parts (the typing indicator).
+        for (const convId of pendingIds) {
+          const state = this.getConvState(convId)
+          if (state.streamState !== 'streaming') {
+            state.streamState = 'streaming'
+            state.streamParts = []
+            state.streamSeq = 0
+            state.streamStartTime = Date.now()
+          }
+        }
+        // A stream that ended while we were disconnected: clear its stale
+        // streaming state (the eager reload below fetches the finished reply).
+        for (const [convId, state] of this.convStates) {
+          if (state.streamState === 'streaming' && !activeIds.has(convId) && !pendingIds.has(convId)) {
+            state.streamState = 'idle'
+            state.streamParts = []
+            state.streamSeq = 0
+            state.streamStartTime = 0
+          }
+        }
+        if (this.pendingSend) {
+          this.send({
+            type: 'chat',
+            conversationId: this.pendingSend.conversationId,
+            clientMsgId: this.pendingSend.clientMsgId,
+            content: this.pendingSend.content,
+          })
+        }
+        if (msg.agent && !this.loadedConversations.has(msg.agent.conversationId)) {
+          this.send({ type: 'conv:load', conversationId: msg.agent.conversationId })
+        }
+        this.notify()
+        break
+      }
+
+      case 'auth:fail':
+        this.connState = 'disconnected'
+        this.notify()
+        break
+
+      case 'pong':
+        if (this.pongTimeout) {
+          clearTimeout(this.pongTimeout)
+          this.pongTimeout = null
+        }
+        break
+
+      case 'conv:messages': {
+        const state = this.getConvState(msg.conversationId)
+        state.messages = msg.messages
+        this.loadedConversations.add(msg.conversationId)
+        if (msg.stream) {
+          state.streamState = 'streaming'
+          if (!state.streamStartTime) state.streamStartTime = Date.now()
+          state.streamParts = rebuildPartsFromSnapshot(msg.stream)
+          state.streamSeq = msg.stream.seq
+        } else if (msg.pending && state.streamState !== 'streaming') {
+          // A reply is queued server-side but hasn't started streaming.
+          state.streamState = 'streaming'
+          state.streamParts = []
+          state.streamSeq = 0
+          state.streamStartTime = Date.now()
+        }
+        this.notify()
+        break
+      }
+
+      case 'msg:user': {
+        const state = this.getConvState(msg.conversationId)
+        // Already known (a reload raced the confirmation, or a resend was
+        // re-confirmed) - appending again would duplicate a keyed row.
+        if (state.messages.some(m => m.id === msg.messageId)) {
+          this.pendingSend = null
+          this.notify()
+          break
+        }
+        const confirmed = localMessage(msg.conversationId, 'user', msg.content, { id: msg.messageId })
+        const optIdx = state.messages.findIndex(m => m.id < 0 && m.role === 'user')
+        if (optIdx >= 0) {
+          state.messages = [...state.messages]
+          state.messages[optIdx] = confirmed
+        } else {
+          state.messages = [...state.messages, confirmed]
+        }
+        this.pendingSend = null
+        this.notify()
+        break
+      }
+
+      case 'stream:reset': {
+        // A truncated attempt was discarded server-side. The server sends the
+        // authoritative parts back to the last committed boundary.
+        const state = this.getConvState(msg.conversationId)
+        state.streamParts = msg.parts as StreamPart[]
+        state.streamSeq = msg.seq
+        state.streamState = 'streaming'
+        if (!state.streamStartTime) state.streamStartTime = Date.now()
+        this.notify()
+        break
+      }
+
+      case 'text': {
+        const state = this.getConvState(msg.conversationId)
+        if (msg.seq > state.streamSeq) {
+          state.streamState = 'streaming'
+          if (!state.streamStartTime) state.streamStartTime = Date.now()
+          const parts = state.streamParts
+          const last = parts[parts.length - 1]
+          if (last && last.type === 'text') {
+            last.content += msg.content
+          } else {
+            parts.push({ type: 'text', content: msg.content })
+          }
+          state.streamParts = [...parts]
+          state.streamSeq = msg.seq
+          this.notify()
+        }
+        break
+      }
+
+      case 'tool_start': {
+        const state = this.getConvState(msg.conversationId)
+        if (msg.seq > state.streamSeq) {
+          state.streamState = 'streaming'
+          if (!state.streamStartTime) state.streamStartTime = Date.now()
+          state.streamParts = [...state.streamParts, {
+            type: 'tool', id: msg.id, name: msg.name, label: msg.label,
+          }]
+          state.streamSeq = msg.seq
+          this.notify()
+        }
+        break
+      }
+
+      case 'tool_result': {
+        const state = this.getConvState(msg.conversationId)
+        if (msg.seq > state.streamSeq) {
+          state.streamParts = state.streamParts.map(p =>
+            p.type === 'tool' && p.id === msg.id ? { ...p, result: msg.result, label: msg.label || p.label } : p
+          )
+          state.streamSeq = msg.seq
+          this.notify()
+        }
+        break
+      }
+
+      case 'done': {
+        const state = this.getConvState(msg.conversationId)
+        // Drop any tool announced but never completed (truncated tail).
+        const parts = state.streamParts.filter(p => p.type === 'text' || (p.type === 'tool' && p.result !== undefined))
+        const text = parts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
+        if (parts.length > 0) {
+          state.messages = [...state.messages, localMessage(msg.conversationId, 'assistant', text, {
+            usage_input: msg.usage?.input ?? null,
+            usage_output: msg.usage?.output ?? null,
+            parts: JSON.stringify(parts), // keep tools where they were used
+          })]
+        }
+        state.streamState = 'idle'
+        state.streamParts = []
+        state.streamSeq = 0
+        state.streamStartTime = 0
+        this.notify()
+        break
+      }
+
+      case 'doc:added': {
+        for (const fn of this.docListeners) {
+          try { fn(msg) } catch {}
+        }
+        break
+      }
+
+      case 'doc:error': {
+        for (const fn of this.docListeners) {
+          try { fn({ conversationId: msg.conversationId, clientDocId: msg.clientDocId, error: msg.message }) } catch {}
+        }
+        break
+      }
+
+      case 'error': {
+        const state = this.getConvState(msg.conversationId)
+        const parts: StreamPart[] = [...state.streamParts]
+        const text = parts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
+        if (parts.length > 0) {
+          parts.push({ type: 'text', content: `\n\n*Error: ${msg.message}*` })
+          state.messages = [...state.messages, localMessage(
+            msg.conversationId, 'assistant', text + `\n\n*Error: ${msg.message}*`,
+            { parts: JSON.stringify(parts) },
+          )]
+        }
+        state.streamState = 'idle'
+        state.streamParts = []
+        state.streamSeq = 0
+        state.streamStartTime = 0
+        state.error = msg.message
+        setTimeout(() => {
+          if (state.error === msg.message) {
+            state.error = null
+            this.notify()
+          }
+        }, 8000)
+        this.notify()
+        break
+      }
+    }
+  }
+
+  sendChat(conversationId: string, content: string) {
+    const clientMsgId = crypto.randomUUID()
+
+    const state = this.getConvState(conversationId)
+    state.messages = [...state.messages, localMessage(conversationId, 'user', content)]
+    state.streamState = 'streaming'
+    state.streamParts = []
+    state.streamSeq = 0
+    state.streamStartTime = Date.now()
+    state.error = null
+
+    this.pendingSend = { conversationId, content, clientMsgId }
+    this.notify()
+
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.send({ type: 'chat', conversationId, clientMsgId, content })
+    }
+  }
+
+  // Store a long attachment as an out-of-context document. The real id comes back
+  // via onDocAdded, keyed by clientDocId.
+  addDocument(conversationId: string, clientDocId: string, title: string, content: string) {
+    this.send({ type: 'doc:add', conversationId, clientDocId, title, content })
+  }
+
+  loadConversation(id: string) {
+    if (this.loadedConversations.has(id)) {
+      // Already loaded — serve from cache, notify to trigger re-render
+      this.notify()
+      return
+    }
+    this.send({ type: 'conv:load', conversationId: id })
+  }
+
+  stopStream(conversationId: string) {
+    this.send({ type: 'stop', conversationId })
+  }
+
+  private send(msg: ClientMsg) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg))
+    }
+  }
+
+  private startPing() {
+    this.stopPing()
+    // Tighter heartbeat: a silent drop surfaces in ~15s worst case instead of ~35s.
+    this.pingInterval = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.send({ type: 'ping', ts: Date.now() })
+        if (!this.pongTimeout) {
+          this.pongTimeout = setTimeout(() => {
+            this.pongTimeout = null
+            this.ws?.close()
+          }, 5_000)
+        }
+      }
+    }, 10_000)
+  }
+
+  private stopPing() {
+    if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null }
+    if (this.pongTimeout) { clearTimeout(this.pongTimeout); this.pongTimeout = null }
+  }
+
+  // The browser knows the network died before any heartbeat can: reflect it instantly.
+  private handleOffline() {
+    if (this.connState === 'connected' || this.connState === 'connecting' || this.connState === 'authenticating') {
+      this.connState = 'reconnecting'
+      this.stopPing()
+      if (this.ws) { try { this.ws.close() } catch {} this.ws = null }
+      this.notify()
+    }
+  }
+
+  private handleOnline() {
+    if (this.pin && this.connState !== 'connected' && this.connState !== 'connecting' && this.connState !== 'authenticating') {
+      this.clearReconnectTimer()
+      this.reconnectDelay = 1000
+      this.doConnect()
+    }
+  }
+}
+
+function rebuildPartsFromSnapshot(snapshot: StreamSnapshot): StreamPart[] {
+  // Prefer the ordered parts so tools reconnect where they were used.
+  if (snapshot.parts && snapshot.parts.length) return snapshot.parts as StreamPart[]
+  const parts: StreamPart[] = []
+  if (snapshot.text) parts.push({ type: 'text', content: snapshot.text })
+  for (const tool of snapshot.tools) {
+    parts.push({ type: 'tool', id: tool.id, name: tool.name, label: tool.label, result: tool.result })
+  }
+  return parts
+}
+
+export const angel = new AngelClient()

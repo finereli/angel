@@ -1,0 +1,33 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="c4-core-glow" cx="50%" cy="46%" r="60%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="38%" stop-color="#e0e7ff"/>
+      <stop offset="72%" stop-color="#a5b4fc"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </radialGradient>
+    <radialGradient id="c4-aura" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#a5b4fc" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#6366f1" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="c4-halo" x1="18%" y1="12%" x2="82%" y2="88%">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="50%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+
+  <g id="bg">
+    <rect x="0" y="0" width="512" height="512" rx="112" fill="#0c0c1d"/>
+  </g>
+
+  <g id="halo">
+    <circle cx="256" cy="256" r="150" fill="url(#c4-aura)"/>
+    <circle cx="256" cy="256" r="150" fill="none" stroke="url(#c4-halo)" stroke-width="18" stroke-linecap="round"/>
+  </g>
+
+  <g id="core">
+    <circle cx="256" cy="248" r="88" fill="url(#c4-core-glow)"/>
+  </g>
+</svg>

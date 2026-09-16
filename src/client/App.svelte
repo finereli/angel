@@ -1,0 +1,403 @@
+<script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import { angel } from './streamManager';
+  import Login from './pages/Login.svelte';
+  import Chat from './pages/Chat.svelte';
+
+  let connState = angel.getConnState();
+  let agent = angel.getAgent();
+  let currentChatId: string | null = null;
+  let menuOpen = false;
+  let darkMode = false;
+  let appMenuOpen = false;
+  let agentLoaded = angel.hasLoadedAgent();
+
+  let unsub: (() => void) | null = null;
+  let busy = false;
+
+  $: agentName = agent?.name || 'Angel';
+
+  onMount(() => {
+    darkMode = localStorage.getItem('darkMode') === 'true' ||
+      (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    applyDarkMode(darkMode);
+
+    unsub = angel.subscribe(() => {
+      connState = angel.getConnState();
+      agent = angel.getAgent();
+      agentLoaded = angel.hasLoadedAgent();
+      busy = !!currentChatId && angel.getConvState(currentChatId).streamState === 'streaming';
+
+      // One agent, one conversation: open it as soon as we know which it is.
+      if (agent && currentChatId !== agent.conversationId) {
+        currentChatId = agent.conversationId;
+        angel.loadConversation(currentChatId);
+      }
+    });
+
+    const savedPin = localStorage.getItem('pin');
+    if (savedPin) {
+      angel.connect(savedPin);
+    }
+  });
+
+  onDestroy(() => {
+    unsub?.();
+  });
+
+  function applyDarkMode(dark: boolean) {
+    document.documentElement.classList.toggle('dark', dark);
+    localStorage.setItem('darkMode', String(dark));
+    const meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement;
+    if (meta) meta.content = dark ? '#1e1e2e' : '#6366f1';
+  }
+
+  function handleLogin(event: CustomEvent<string>) {
+    localStorage.setItem('pin', event.detail);
+    angel.connect(event.detail);
+  }
+
+  function toggleDark() {
+    darkMode = !darkMode;
+    applyDarkMode(darkMode);
+  }
+
+  async function hardReload() {
+    appMenuOpen = false;
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+    } catch {}
+    location.reload();
+  }
+
+  $: needsAuth = connState === 'disconnected' && !localStorage.getItem('pin');
+  $: authFailed = connState === 'disconnected' && !!localStorage.getItem('pin');
+</script>
+
+{#if needsAuth || authFailed}
+  <Login on:login={handleLogin} failed={authFailed} />
+{:else}
+  <div class="app" class:menu-open={menuOpen}>
+    <!-- Sidebar -->
+    <aside class="sidebar" class:open={menuOpen}>
+      <div class="sidebar-header">
+        <div class="brand">
+          <h1>{agentName}</h1>
+          {#if connState === 'connected'}
+            <span class="status-dot connected" title="Connected"></span>
+          {:else}
+            <span class="status-dot reconnecting" title="Connecting..."></span>
+          {/if}
+        </div>
+      </div>
+      <div class="channel-list">
+        <button class="channel-item active" on:click={() => (menuOpen = false)}>
+          <span class="channel-icon">&amp;</span>
+          <span class="channel-name">{agentName}</span>
+          {#if busy}
+            <span class="busy-dot" title="Responding..."></span>
+          {/if}
+        </button>
+      </div>
+      <div class="sidebar-footer">
+        <button class="footer-btn" on:click={toggleDark}>
+          <span class="footer-icon">{#if darkMode}&#9728;{:else}&#9790;{/if}</span>
+          <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="app-bar">
+        <button class="menu-btn" on:click={() => menuOpen = !menuOpen}>
+          &#9776;
+        </button>
+        <span class="app-bar-title">{agentName}</span>
+        <div class="app-menu">
+          <button class="icon-btn kebab" on:click={() => appMenuOpen = !appMenuOpen} title="Menu">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+          </button>
+          {#if appMenuOpen}
+            <div class="app-menu-dropdown">
+              <button class="app-menu-item" on:click={hardReload}>Reload</button>
+            </div>
+          {/if}
+        </div>
+      </header>
+      {#if appMenuOpen}
+        <button class="menu-scrim" on:click={() => appMenuOpen = false} aria-label="Close menu"></button>
+      {/if}
+
+      {#if currentChatId}
+        <Chat conversationId={currentChatId} />
+      {:else if agentLoaded && !agent}
+        <div class="empty-state">
+          <p>No agent configured</p>
+        </div>
+      {:else}
+        <div class="loading-state">Loading...</div>
+      {/if}
+    </main>
+
+    {#if menuOpen}
+      <div class="overlay" on:click={() => menuOpen = false} on:keydown={() => {}}></div>
+    {/if}
+  </div>
+{/if}
+
+<style>
+  .app {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    width: 260px;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+  }
+
+  .sidebar-header {
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-header h1 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-primary);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .channel-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .channel-item {
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    border-left: 2px solid transparent;
+    border-radius: 0 8px 8px 0;
+    cursor: pointer;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    margin-bottom: 1px;
+  }
+  .channel-item:hover { background: var(--bg-hover); }
+  .channel-item.active {
+    background: var(--bg-active);
+    border-left-color: var(--accent);
+  }
+
+  .channel-icon {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    width: 1.2em;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .channel-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sidebar-footer {
+    border-top: 1px solid var(--border);
+    padding: 8px;
+  }
+  .footer-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    text-align: left;
+  }
+  .footer-btn:hover { background: var(--bg-hover); }
+  .footer-icon { width: 1.2em; text-align: center; }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .busy-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-left: auto;
+    flex-shrink: 0;
+    animation: pulse 1.5s infinite;
+  }
+  .status-dot.connected { background: #22c55e; }
+  .status-dot.reconnecting { background: #f59e0b; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  .icon-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+  .icon-btn:hover { background: var(--bg-hover); }
+
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .app-bar {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-surface);
+    flex-shrink: 0;
+  }
+
+  .menu-btn {
+    display: none;
+    background: none;
+    border: none;
+    font-size: 1.3rem;
+    cursor: pointer;
+    color: var(--text-primary);
+    padding: 4px 8px;
+    margin-right: 8px;
+  }
+
+  .app-bar-title {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .loading-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .app-menu { position: relative; flex-shrink: 0; }
+  .kebab { display: flex; align-items: center; justify-content: center; }
+  .app-menu-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    min-width: 140px;
+    padding: 4px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    z-index: 200;
+  }
+  .app-menu-item {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .app-menu-item:hover { background: var(--bg-hover); }
+  .menu-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 150;
+    background: transparent;
+    border: none;
+    cursor: default;
+  }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--text-secondary);
+  }
+
+  .overlay { display: none; }
+
+  @media (max-width: 768px) {
+    .sidebar {
+      position: fixed;
+      left: 0; top: 0; bottom: 0;
+      z-index: 100;
+      transform: translateX(-100%);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .menu-btn { display: block; }
+    .overlay {
+      display: block;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      z-index: 99;
+    }
+  }
+</style>

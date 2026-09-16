@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "angel",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2025-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"] }],
+  "observability": { "enabled": true },
+  "routes": [{ "pattern": "angel.finereli.com", "custom_domain": true }],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/", "/api/*", "/ws", "/mcp", "/oauth/*", "/.well-known/*", "/health", "/chat"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "angel-db", "database_id": "1d914523-c7a9-4cd3-8b7b-811e56c3b01f", "migrations_dir": "migrations" }
+  ],
+  "ai": { "binding": "AI" },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ANGEL_DO", "class_name": "AngelDO" },
+      { "name": "Sandbox", "class_name": "Sandbox" }
+    ]
+  },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AngelDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["Sandbox"] }
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}
