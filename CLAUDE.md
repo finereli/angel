@@ -76,12 +76,12 @@ npx wrangler d1 execute angel-db --remote --command "SQL"
 
 ## Deploying
 
-The deploy includes a Cloudflare Container (the agent's workspace sandbox — `workspace_exec` and friends), which changes the routine:
+`npm run deploy` runs `scripts/deploy.sh`, which builds the client and then deploys smartly: it hashes `Dockerfile` + `wrangler.jsonc` and compares against `.deploy-image.hash` (local, gitignored). Unchanged → `wrangler deploy --containers-rollout=none`, no Docker involved. Changed (or no recorded hash) → a normal `wrangler deploy`, which builds the container image from `./Dockerfile` and pushes it. Use `npm run deploy:image` to force a rebuild regardless of the hash.
 
 1. `npm install --legacy-peer-deps` — plain `npm install`/`npm ci` fails on a peerOptional conflict between the locked wrangler and `@cloudflare/workers-types`. This also installs the pre-push hook (`prepare` points `core.hooksPath` at `.githooks`).
-2. **Docker must be running.** `wrangler deploy` builds the container image from `./Dockerfile` (base: `docker.io/cloudflare/sandbox:0.12.9-python` — keep the tag in lockstep with the `@cloudflare/sandbox` version in package.json) and pushes it to Cloudflare's registry. Without Docker the deploy fails; `npx wrangler deploy --containers-rollout=none` deploys the Worker alone in a pinch.
-3. `npm run deploy`. The first containers deploy also applies DO migration `v2` (the `Sandbox` class) automatically.
-4. **Wait 2–3 minutes after the first containers deploy** before the first `workspace_exec` — early calls error until the container is provisioned.
+2. **Docker must be running only when the image is actually rebuilding** (base: `docker.io/cloudflare/sandbox:0.12.9-python` — keep the tag in lockstep with the `@cloudflare/sandbox` version in package.json). The script skips Docker entirely on an unchanged image.
+3. `npm run deploy` (or `npm run deploy:image` after touching the Dockerfile/`wrangler.jsonc`). The first-ever containers deploy also applies DO migration `v2` (the `Sandbox` class) automatically.
+4. **Wait 2–3 minutes after a containers deploy** before the first `workspace_exec` — early calls error until the container is provisioned. Not needed after a `--containers-rollout=none` deploy.
 5. Verify: ask the agent to `ls /workspace`; check `npx wrangler tail` if a sandbox tool errors.
 
 If you fork this repo and don't want the container, drop the `containers` block and the `Sandbox` binding from `wrangler.jsonc`, delete `src/worker/tools/sandbox.ts` and `src/worker/sandbox.ts`, and remove them from `registry.ts`. Everything else runs without Docker.
