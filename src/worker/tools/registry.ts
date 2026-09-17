@@ -4,6 +4,7 @@ import { listTools } from './lists'
 import { documentTools } from './documents'
 import { webTools } from './web'
 import { utilTools } from './util'
+import { systemTools } from './system'
 import { budgetTools } from './budget'
 import { wakeupTools } from './wakeup'
 import { codeTools } from './code'
@@ -34,6 +35,7 @@ const ALL_TOOLS: Tool[] = [
   ...listTools,
   ...documentTools,
   ...utilTools,
+  ...systemTools,
   ...budgetTools,
   ...wakeupTools,
   ...codeTools,

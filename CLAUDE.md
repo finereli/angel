@@ -66,7 +66,7 @@ The `agents` table holds a persistent `cadence_minutes`. The DO alarm handler au
 
 ```
 npm run dev              # vite + wrangler dev
-npm run build            # svelte-check + vite build
+npm run build            # svelte-check + tests + vite build
 npm run check            # svelte-check only
 npm run deploy           # build + wrangler deploy
 npm run typecheck        # tsc --noEmit (worker; also runs in the pre-push hook)
@@ -120,6 +120,7 @@ Set with `npx wrangler secret put <NAME>`.
 ## Key conventions
 
 - **Svelte 5**: runes throughout (`$state`, `$derived`, `$effect`, `$props`, snippets), event handlers as props (`onclick`), mounted with `mount()`. Client code follows the pwa skill's kit, vendored under `shared/` with `pwa-kit` headers (run `python3 ~/.claude/skills/pwa/scripts/kit.py status .` to track drift). Theming is CSS custom properties in `shared/css/base.css`; no Tailwind.
+- **System doc is code-owned**: Angel's account of his own machine lives in `src/worker/system-doc.ts` and is served on demand through the `read_system_doc` tool (`src/worker/tools/system.ts`) - deliberately not injected every turn. The model inventory is generated from `models.ts`, so it cannot drift; the prose is hand-authored, so update it when the architecture changes. The `system_doc` D1 table is legacy (unused since the doc became code). `npm test` (run by `npm run build`) guards the generated parts.
 - **No persona in system prompts**: identity emerges from the conversation stream (`src/worker/identity.ts` is operating notes only).
 - **Memory is pyramidal**: stream pyramid for recency, observation pyramid for tagged recall. Both run in the background after the reply.
 - **One agent, one conversation**: the `agents` and `conversations` tables stay generic (nothing hardcodes a single row), but the UI routes straight to the one conversation and there is no switcher.

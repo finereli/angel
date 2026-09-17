@@ -3,7 +3,6 @@ import { chatCompletionStream, getModel } from './llm'
 import { getToolDefinitions, executeTool, toolDoneLabel, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble, buildPerMessageReminder } from './lists'
-import { getSystemDoc, DEFAULT_SYSTEM_DOC } from './system-doc'
 import { renderStreamContext, type Pair } from './stream-pyramid'
 import { DsmlStreamFilter, parseDsml } from './dsml'
 
@@ -76,8 +75,6 @@ function parseToolArgs(tc: ToolCall): Record<string, unknown> {
 
 async function buildSystemPrompt(env: Env, agentId: string, agentName: string): Promise<string> {
   const parts = [buildOperatingNotes(agentName)]
-  const doc = (await getSystemDoc(env, agentId)) || DEFAULT_SYSTEM_DOC
-  if (doc) parts.push(`# Your system\n${doc}`)
   const lists = await buildListsPreamble(env, agentId)
   if (lists) parts.push(lists)
   return parts.join('\n\n')
