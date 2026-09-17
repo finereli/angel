@@ -3,13 +3,13 @@
   import { angel } from './streamManager';
   import Login from './pages/Login.svelte';
   import Chat from './pages/Chat.svelte';
+  import ResetButton from './ResetButton.svelte';
 
   let connState = angel.getConnState();
   let agent = angel.getAgent();
   let currentChatId: string | null = null;
   let menuOpen = false;
   let darkMode = false;
-  let appMenuOpen = false;
   let agentLoaded = angel.hasLoadedAgent();
 
   let unsub: (() => void) | null = null;
@@ -62,21 +62,6 @@
     applyDarkMode(darkMode);
   }
 
-  async function hardReload() {
-    appMenuOpen = false;
-    try {
-      if ('serviceWorker' in navigator) {
-        const regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map(r => r.unregister()));
-      }
-      if ('caches' in window) {
-        const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k)));
-      }
-    } catch {}
-    location.reload();
-  }
-
   $: needsAuth = connState === 'disconnected' && !localStorage.getItem('pin');
   $: authFailed = connState === 'disconnected' && !!localStorage.getItem('pin');
 </script>
@@ -111,6 +96,10 @@
           <span class="footer-icon">{#if darkMode}&#9728;{:else}&#9790;{/if}</span>
           <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>
         </button>
+        <div class="version-row">
+          <span class="version">v{__BUILD__}</span>
+          <ResetButton />
+        </div>
       </div>
     </aside>
 
@@ -121,20 +110,7 @@
           &#9776;
         </button>
         <span class="app-bar-title">{agentName}</span>
-        <div class="app-menu">
-          <button class="icon-btn kebab" on:click={() => appMenuOpen = !appMenuOpen} title="Menu">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
-          </button>
-          {#if appMenuOpen}
-            <div class="app-menu-dropdown">
-              <button class="app-menu-item" on:click={hardReload}>Reload</button>
-            </div>
-          {/if}
-        </div>
       </header>
-      {#if appMenuOpen}
-        <button class="menu-scrim" on:click={() => appMenuOpen = false} aria-label="Close menu"></button>
-      {/if}
 
       {#if currentChatId}
         <Chat conversationId={currentChatId} />
@@ -255,6 +231,15 @@
   .footer-btn:hover { background: var(--bg-hover); }
   .footer-icon { width: 1.2em; text-align: center; }
 
+  .version-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px 2px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+  }
+
   .status-dot {
     width: 8px;
     height: 8px;
@@ -272,17 +257,6 @@
   .status-dot.connected { background: #22c55e; }
   .status-dot.reconnecting { background: #f59e0b; animation: pulse 1.5s infinite; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-
-  .icon-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1.2rem;
-    color: var(--text-secondary);
-    padding: 4px 8px;
-    border-radius: 6px;
-  }
-  .icon-btn:hover { background: var(--bg-hover); }
 
   .main {
     flex: 1;
@@ -333,42 +307,6 @@
     justify-content: center;
     color: var(--text-secondary);
     font-size: 0.9rem;
-  }
-
-  .app-menu { position: relative; flex-shrink: 0; }
-  .kebab { display: flex; align-items: center; justify-content: center; }
-  .app-menu-dropdown {
-    position: absolute;
-    top: 100%;
-    right: 0;
-    margin-top: 4px;
-    min-width: 140px;
-    padding: 4px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-    z-index: 200;
-  }
-  .app-menu-item {
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    color: var(--text-primary);
-    padding: 8px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.9rem;
-  }
-  .app-menu-item:hover { background: var(--bg-hover); }
-  .menu-scrim {
-    position: fixed;
-    inset: 0;
-    z-index: 150;
-    background: transparent;
-    border: none;
-    cursor: default;
   }
 
   .empty-state {
