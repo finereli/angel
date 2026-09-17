@@ -1,11 +1,12 @@
 import type {
   Env, ClientMsg, ServerMsg, StreamSnapshot,
-  MessageRow, StreamPart, AgentInfo,
+  MessageRow, StreamPart, AgentInfo, ConversationRow,
 } from './types'
 import { runAgent, runMemoryPass } from './agent'
 import { storeDocument, normalizeContent } from './documents'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
+import { getConversation, conversationInfo, renderSeedText } from './conversation-context'
 import { isKnownModel, isReasoningEffort } from './models'
 
 interface ActiveStream {
@@ -149,6 +150,14 @@ export class AngelDO implements DurableObject {
         await this.handleConvLoad(ws, msg.conversationId)
         break
 
+      case 'conv:list':
+        await this.handleConvList(ws)
+        break
+
+      case 'conv:create-side':
+        await this.handleCreateSide(ws, msg.title)
+        break
+
       case 'chat':
         await this.handleChat(msg.conversationId, msg.clientMsgId, msg.content)
         break
@@ -183,11 +192,36 @@ export class AngelDO implements DurableObject {
     const row = await this.env.DB.prepare(
       `SELECT a.id, a.name, a.model, a.reasoning_effort, c.id as conversation_id
        FROM agents a JOIN conversations c ON c.agent_id = a.id
+       WHERE c.parent_id IS NULL
        ORDER BY a.created_at, c.created_at LIMIT 1`
     ).first<{ id: string; name: string; model: string | null; reasoning_effort: string | null; conversation_id: string }>()
     return row
       ? { id: row.id, name: row.name, conversationId: row.conversation_id, model: row.model, reasoningEffort: row.reasoning_effort }
       : null
+  }
+
+  private async handleConvList(ws: WebSocket) {
+    const agent = await this.loadAgent()
+    if (!agent) return
+    const rows = await this.env.DB.prepare(
+      `SELECT * FROM conversations WHERE agent_id = ? AND archived = 0 ORDER BY created_at`
+    ).bind(agent.id).all<ConversationRow>()
+    this.send(ws, { type: 'conv:list', conversations: rows.results.map(conversationInfo) })
+  }
+
+  // A side conversation: branch off the main line with a frozen render of it.
+  private async handleCreateSide(ws: WebSocket, title: string) {
+    const agent = await this.loadAgent()
+    if (!agent) return
+    const seed = await renderSeedText(this.env, agent.id, agent.conversationId)
+    const id = `side-${crypto.randomUUID().slice(0, 8)}`
+    const cleanTitle = (title || '').trim() || `Side chat ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`
+    await this.env.DB.prepare(
+      `INSERT INTO conversations (id, title, agent_id, parent_id, seed, seed_at, source)
+       VALUES (?, ?, ?, ?, ?, ?, 'web')`
+    ).bind(id, cleanTitle, agent.id, agent.conversationId, seed, new Date().toISOString()).run()
+    const row = await getConversation(this.env, id)
+    if (row) this.broadcast({ type: 'conv:created', conversation: conversationInfo(row) })
   }
 
   private async handleSettingsSet(ws: WebSocket, model: string | null, reasoningEffort: string | null) {
@@ -498,6 +532,10 @@ export class AngelDO implements DurableObject {
     catch (e) { console.error('[postStreamWork:memory-pass]', e instanceof Error ? e.message : e) }
     try { await buildObservationPyramid(this.env, agentId) }
     catch (e) { console.error('[postStreamWork:obs-pyramid]', e instanceof Error ? e.message : e) }
+    // Side conversations don't feed the stream pyramid - its tiles are per-agent,
+    // so a side's pair indices would collide with the main line's.
+    const conv = await getConversation(this.env, conversationId)
+    if (conv?.parent_id) return
     try { await buildStreamPyramid(this.env, agentId, conversationId) }
     catch (e) { console.error('[postStreamWork:stream-pyramid]', e instanceof Error ? e.message : e) }
   }
@@ -577,7 +615,7 @@ export class AngelDO implements DurableObject {
       `SELECT w.agent_id, w.reason, a.name as agent_name, a.model as agent_model, a.reasoning_effort as agent_reasoning_effort, a.cadence_minutes, c.id as conversation_id
        FROM agent_wakeups w
        JOIN agents a ON a.id = w.agent_id
-       JOIN conversations c ON c.agent_id = w.agent_id
+       JOIN conversations c ON c.agent_id = w.agent_id AND c.parent_id IS NULL
        WHERE w.wake_at <= ?
        ORDER BY w.wake_at ASC`
     ).bind(now).all<{ agent_id: string; reason: string | null; agent_name: string; agent_model: string | null; agent_reasoning_effort: string | null; cadence_minutes: number | null; conversation_id: string }>()

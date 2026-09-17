@@ -1,9 +1,9 @@
-import type { Env, ChatMessage, ToolCall, AgentEvent, ServerMsg, StreamSummaryRow } from './types'
+import type { Env, ChatMessage, ToolCall, AgentEvent, ServerMsg } from './types'
 import { chatCompletionStream, getModel } from './llm'
 import { getToolDefinitions, executeTool, toolDoneLabel, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble, buildPerMessageReminder } from './lists'
-import { renderStreamContext, type Pair } from './stream-pyramid'
+import { loadConversationContext, verbatimTurns, type SideInfo } from './conversation-context'
 import { DsmlStreamFilter, parseDsml } from './dsml'
 
 const MAX_TOOL_ROUNDS = 200
@@ -73,8 +73,18 @@ function parseToolArgs(tc: ToolCall): Record<string, unknown> {
   try { return JSON.parse(tc.function.arguments || '{}') } catch { return {} }
 }
 
-async function buildSystemPrompt(env: Env, agentId: string, agentName: string): Promise<string> {
+// Framing for a side conversation, so the agent knows which stream it is in:
+// main does not see this, and nothing here survives unless recorded.
+function sidePreamble(side: SideInfo): string {
+  const when = side.seedAt ? `${side.seedAt.slice(0, 16).replace('T', ' ')} UTC` : 'an earlier point'
+  const name = side.title ? ` called "${side.title}"` : ''
+  return `# This is a side conversation
+You're in a side conversation${name}, branched off the main line at ${when}. Eli is here with you, off to the side. The main line does not see anything said here and will not remember it. Where the main line stood when you branched is in your history above. Anything worth keeping across the main line has to be recorded as an observation - otherwise it goes when this thread does.`
+}
+
+async function buildSystemPrompt(env: Env, agentId: string, agentName: string, side: SideInfo | null = null): Promise<string> {
   const parts = [buildOperatingNotes(agentName)]
+  if (side) parts.push(sidePreamble(side))
   const lists = await buildListsPreamble(env, agentId)
   if (lists) parts.push(lists)
   return parts.join('\n\n')
@@ -82,37 +92,13 @@ async function buildSystemPrompt(env: Env, agentId: string, agentName: string): 
 
 const dateLine = (ts: string | null): string => (ts ? ts.slice(0, 10) : '')
 
-// The stream pyramid spliced as prior turns - Angel's own memory, first person.
-function recapTurns(tiles: StreamSummaryRow[]): ChatMessage[] {
-  if (tiles.length === 0) return []
-  const recap = tiles.map(t => t.text).join('\n\n')
-  return [
-    { role: 'user', content: `(picking up where we left off - my memory of earlier)\n\n${recap}` },
-    { role: 'assistant', content: "Right - that's where we've been." },
-  ]
-}
-
-// Verbatim tail as real prior turns, each marked with date + thread topic.
-// Skip unanswered pairs (an in-flight message from another thread, or a turn that
-// errored before saving a reply) so they can't appear as history to answer.
-function verbatimTurns(pairs: Pair[]): ChatMessage[] {
-  const msgs: ChatMessage[] = []
-  for (const p of pairs) {
-    if (!p.assistantContent) continue
-    const marker = `[${dateLine(p.userTs)}]`
-    msgs.push({ role: 'user', content: `${marker} ${p.userContent}` })
-    msgs.push({ role: 'assistant', content: p.assistantContent })
-  }
-  return msgs
-}
-
 // ---- Response pass (hot path, streaming) ----
 export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGenerator<AgentEvent> {
   const { env, conversationId, agentId, agentName, agentModel, agentReasoningEffort } = ctx
   const modelId = getModel(env, agentModel)
 
-  let system = await buildSystemPrompt(env, agentId, agentName)
-  const { tiles, verbatim, total } = await renderStreamContext(env, agentId, conversationId)
+  const { recap, verbatim, total, side } = await loadConversationContext(env, agentId, conversationId)
+  const system = await buildSystemPrompt(env, agentId, agentName, side)
   // The current message is already saved; drop it from the verbatim tail and append it live.
   const history = verbatim.filter(p => p.idx !== total - 1)
 
@@ -121,7 +107,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
 
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
-    ...recapTurns(tiles),
+    ...recap,
     ...verbatimTurns(history),
     { role: 'user', content: `${marker} ${userMessage}${reminder ? '\n\n' + reminder : ''}` },
   ]
@@ -259,13 +245,13 @@ export async function runMemoryPass(ctx: AgentContext): Promise<void> {
   const { env, conversationId, agentId, agentName, agentModel } = ctx
   const modelId = getModel(env, agentModel)
 
-  const system = await buildSystemPrompt(env, agentId, agentName)
-  const { tiles, verbatim } = await renderStreamContext(env, agentId, conversationId)
+  const { recap, verbatim, side } = await loadConversationContext(env, agentId, conversationId)
+  const system = await buildSystemPrompt(env, agentId, agentName, side)
   const reminder = await buildPerMessageReminder(env, agentId)
   const memoryPrompt = "(memory) Instead of replying, look back at the latest exchange. If anything there is worth remembering, record it with record_observation - in your own voice, tagged, following your memory-instructions. If nothing is, do nothing. Do not address Eli here."
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
-    ...recapTurns(tiles),
+    ...recap,
     ...verbatimTurns(verbatim),
     {
       role: 'user',

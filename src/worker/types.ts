@@ -28,6 +28,18 @@ export interface ConversationRow {
   archived: number
   source: string
   agent_id: string | null
+  parent_id: string | null // set on a side conversation; null for the main line
+  seed: string | null // frozen render of the main line at branch time
+  seed_at: string | null
+}
+
+// What the client sees of a conversation (main or side).
+export interface ConversationInfo {
+  id: string
+  title: string | null
+  parentId: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export interface MessageRow {
@@ -178,6 +190,8 @@ export type ClientMsg =
   | { type: 'auth'; pin: string }
   | { type: 'ping'; ts: number }
   | { type: 'conv:load'; conversationId: string }
+  | { type: 'conv:list' }
+  | { type: 'conv:create-side'; title: string }
   | { type: 'chat'; conversationId: string; clientMsgId: string; content: string }
   | { type: 'doc:add'; conversationId: string; clientDocId: string; title: string; content: string }
   | { type: 'stop'; conversationId: string }
@@ -187,6 +201,8 @@ export type ServerMsg =
   | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agent: AgentInfo | null; pendingTurns: string[] }
   | { type: 'auth:fail' }
   | { type: 'pong'; ts: number }
+  | { type: 'conv:list'; conversations: ConversationInfo[] }
+  | { type: 'conv:created'; conversation: ConversationInfo }
   | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot; pending?: boolean }
   | { type: 'msg:user'; conversationId: string; clientMsgId: string; messageId: number; content: string }
   | { type: 'text'; conversationId: string; seq: number; content: string }

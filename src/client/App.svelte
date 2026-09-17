@@ -21,13 +21,24 @@
   // for taps inside it.
   router.onChange(() => (menuOpen = false))
 
-  const view = $derived(router.route.view)
+  const route = $derived(router.route)
   const agentName = $derived(angel.agent?.name || 'Angel')
-  const title = $derived(view === 'settings' ? 'Settings' : agentName)
+  const isChat = $derived(route.view === 'chat' || route.view === 'side')
+  const sides = $derived(angel.conversations.filter(c => c.parentId))
+  const sideTitle = $derived(route.view === 'side' ? (angel.conversations.find(c => c.id === route.id)?.title || 'Side chat') : null)
+  const title = $derived(route.view === 'settings' ? 'Settings' : route.view === 'side' ? (sideTitle || 'Side chat') : agentName)
+  const activeConvId = $derived(route.view === 'side' ? route.id : route.view === 'chat' ? (angel.mainConversationId ?? '') : '')
   const entries = $derived([
-    { label: agentName, hash: '/chat', current: view === 'chat' },
-    { label: 'Settings', hash: '/settings', current: view === 'settings' },
+    { label: agentName, hash: '/chat', current: route.view === 'chat' },
+    ...sides.map(s => ({ label: s.title || 'Side chat', hash: `/side/${s.id}`, current: route.view === 'side' && route.id === s.id })),
+    { label: 'Settings', hash: '/settings', current: route.view === 'settings' },
   ])
+
+  async function newSideChat() {
+    menuOpen = false
+    const id = await angel.createSideConversation('')
+    if (id) location.hash = `/side/${id}`
+  }
 
   let dark = $state(isDark())
   function toggleDark() {
@@ -48,11 +59,13 @@
   <div class="shell">
     <TopBar leading="menu" {title} onleading={() => (menuOpen = true)} />
 
-    <div class="body" class:chat={view === 'chat'}>
-      {#if view === 'settings'}
+    <div class="body" class:chat={isChat}>
+      {#if route.view === 'settings'}
         <Settings />
+      {:else if activeConvId}
+        <Chat conversationId={activeConvId} />
       {:else}
-        <Chat />
+        <div class="loading-state">Loading...</div>
       {/if}
     </div>
 
@@ -71,6 +84,10 @@
       </div>
     {/snippet}
     {#snippet footer()}
+      <button class="footer-btn" onclick={newSideChat}>
+        <span class="footer-icon">&#65291;</span>
+        <span>New side chat</span>
+      </button>
       <button class="footer-btn" onclick={toggleDark}>
         <span class="footer-icon">{dark ? '\u2600' : '\u263A'}</span>
         <span>{dark ? 'Light mode' : 'Dark mode'}</span>
@@ -110,6 +127,14 @@
   }
 
   .brand { display: flex; align-items: center; gap: 8px; }
+  .loading-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; }
   .status-dot.connected { background: var(--ok); }
   .status-dot.reconnecting { background: #f59e0b; animation: pulse 1.5s infinite; }

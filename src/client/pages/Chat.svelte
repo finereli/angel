@@ -25,9 +25,10 @@
   // real id arrives via onDocAdded. On send its pointer is folded into the message.
   interface PendingDoc { clientDocId: string; title: string; lines: number; status: 'uploading' | 'ready'; id?: string }
 
-  // One agent, one conversation: the id comes from the agent, not a prop.
-  const convId = $derived(angel.agent?.conversationId ?? '')
-  const conv = $derived(convId ? angel.convStates[convId] : undefined)
+  // The conversation to render - the main line or a side chat, passed by the shell.
+  let { conversationId }: { conversationId: string } = $props()
+  const convId = $derived(conversationId)
+  const conv = $derived(angel.convStates[conversationId])
   const streaming = $derived(conv?.streamState === 'streaming');
 
   let messageText = $state('');
@@ -210,6 +211,7 @@
     attachError = '';
     userHasScrolledUp = false;
     messageText = localStorage.getItem(draftKey(convId)) || '';
+    angel.loadConversation(convId);
     tick().then(() => { autoResize(); scrollToBottom(); });
   });
 

@@ -1,5 +1,5 @@
 import type {
-  ClientMsg, ServerMsg, MessageRow, StreamSnapshot, StreamPart, AgentInfo,
+  ClientMsg, ServerMsg, MessageRow, StreamSnapshot, StreamPart, AgentInfo, ConversationInfo,
 } from '../../worker/types'
 
 export type { StreamPart }
@@ -64,6 +64,7 @@ class AngelClient {
   agentLoaded = $state(false)
   settingsError = $state<string | null>(null)
   convStates = $state<Record<string, ConversationState>>({})
+  conversations = $state<ConversationInfo[]>([])
 
   #ws: WebSocket | null = null
   #docListeners = new Set<DocListener>()
@@ -75,6 +76,7 @@ class AngelClient {
   #loadedConversations = new Set<string>()
   #pinResolve: ((ok: boolean) => void) | null = null
   #candidatePin: string | null = null
+  #createResolve: ((id: string) => void) | null = null
 
   constructor() {
     // Visibility-change reconnect: bypass throttled timers on mobile.
@@ -95,6 +97,8 @@ class AngelClient {
   }
 
   get signedIn(): boolean { return this.pin !== null }
+
+  get mainConversationId(): string | null { return this.agent?.conversationId ?? null }
 
   // Optimistic boot: a stored PIN shows the app immediately; the first
   // auth:fail clears it and drops back to the keypad.
@@ -272,6 +276,7 @@ class AngelClient {
         if (msg.agent && !this.#loadedConversations.has(msg.agent.conversationId)) {
           this.send({ type: 'conv:load', conversationId: msg.agent.conversationId })
         }
+        this.send({ type: 'conv:list' })
         break
       }
 
@@ -313,6 +318,21 @@ class AngelClient {
         }
         break
       }
+
+      case 'conv:list':
+        this.conversations = msg.conversations
+        break
+
+      case 'conv:created':
+        if (!this.conversations.some(c => c.id === msg.conversation.id)) {
+          this.conversations = [...this.conversations, msg.conversation]
+        }
+        if (this.#createResolve) {
+          const resolve = this.#createResolve
+          this.#createResolve = null
+          resolve(msg.conversation.id)
+        }
+        break
 
       case 'msg:user': {
         const state = this.getConvState(msg.conversationId)
@@ -474,6 +494,21 @@ class AngelClient {
   // via onDocAdded, keyed by clientDocId.
   addDocument(conversationId: string, clientDocId: string, title: string, content: string) {
     this.send({ type: 'doc:add', conversationId, clientDocId, title, content })
+  }
+
+  // Start a side conversation: branches off the main line with a frozen render
+  // of it. Resolves with the new conversation id (the server sends conv:created).
+  createSideConversation(title: string): Promise<string> {
+    return new Promise((resolve) => {
+      this.#createResolve = resolve
+      this.send({ type: 'conv:create-side', title })
+      setTimeout(() => {
+        if (this.#createResolve === resolve) {
+          this.#createResolve = null
+          resolve('')
+        }
+      }, 10_000)
+    })
   }
 
   loadConversation(id: string) {
