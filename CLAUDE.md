@@ -9,7 +9,7 @@ This is a baseline to fork. It carries the harness — memory pyramids, tools, s
 - **Worker** (`src/worker/`): Hono-based Cloudflare Worker. Routes in `index.ts` — the SPA, health, OAuth, and MCP. That's the whole surface.
 - **Durable Object** (`src/worker/durable-object.ts`): a single `AngelDO` instance owns all WebSocket connections, agent execution, and alarm-driven wakeups. It serializes everything: one response at a time, memory work on its own chain.
 - **D1** (`migrations/`): SQLite for agents, conversations, messages, observations and their summary pyramid, stream summaries, tags, lists, documents, wakeups, saved scripts, logs, and a small kv table. One consolidated `0001_init.sql`.
-- **Client** (`src/client/`): Svelte 4 SPA. `App.svelte` is the shell and routes straight to the agent's one conversation; `pages/Chat.svelte` is the chat. Stream management in `streamManager.ts`. Markdown rendering + DOMPurify sanitization in `util.ts`.
+- **Client** (`src/client/`): Svelte 5 SPA, runes throughout. The shell is the pwa skill's kit - `TopBar` + `Drawer` + a hash router - with Angel's own views: `pages/Chat.svelte` (the one conversation) and `pages/Settings.svelte` (model + thinking effort). Stream management in `lib/streamManager.svelte.ts` (rune state, PIN auth). Markdown rendering + DOMPurify in `util.ts`. Vendored kit code lives in `shared/` and imports as `$shared/*` (base.css, build helper, router/theme/toast/format/updates/ws-client, and the shared UI components).
 - **MCP server** (`src/worker/mcp.ts`): JSON-RPC 2.0 at `POST /mcp` with OAuth (HMAC tokens signed with the PIN). Exposes `get_cadence` and `set_cadence` so an external agent can check and adjust the agent's heartbeat.
 - **Agent tools** (`src/worker/tools/`): tool definitions and handlers registered via `registry.ts`. Each file exports a tool array: memory, lists, documents, web, util, random, budget, wakeup/cadence, code (QuickJS REPL), sandbox (workspace).
 
@@ -66,10 +66,12 @@ The `agents` table holds a persistent `cadence_minutes`. The DO alarm handler au
 
 ```
 npm run dev              # vite + wrangler dev
-npm run build            # vite build only
-npm run deploy           # vite build + wrangler deploy
-npm run typecheck        # tsc --noEmit (also runs in the pre-push hook)
-npx vitest run           # unit tests (DSML parser)
+npm run build            # svelte-check + vite build
+npm run check            # svelte-check only
+npm run deploy           # build + wrangler deploy
+npm run typecheck        # tsc --noEmit (worker; also runs in the pre-push hook)
+npm test                 # unit tests (DSML parser)
+npm run icon <name>      # extract a Material Symbols glyph into shared/lib/icons.ts
 npx wrangler d1 migrations apply angel-db --local   # or --remote
 npx wrangler d1 execute angel-db --remote --command "SQL"
 ```
@@ -117,7 +119,7 @@ Set with `npx wrangler secret put <NAME>`.
 
 ## Key conventions
 
-- **Svelte 4**: `export let` for props, `$:` for reactive, no runes.
+- **Svelte 5**: runes throughout (`$state`, `$derived`, `$effect`, `$props`, snippets), event handlers as props (`onclick`), mounted with `mount()`. Client code follows the pwa skill's kit, vendored under `shared/` with `pwa-kit` headers (run `python3 ~/.claude/skills/pwa/scripts/kit.py status .` to track drift). Theming is CSS custom properties in `shared/css/base.css`; no Tailwind.
 - **No persona in system prompts**: identity emerges from the conversation stream (`src/worker/identity.ts` is operating notes only).
 - **Memory is pyramidal**: stream pyramid for recency, observation pyramid for tagged recall. Both run in the background after the reply.
 - **One agent, one conversation**: the `agents` and `conversations` tables stay generic (nothing hardcodes a single row), but the UI routes straight to the one conversation and there is no switcher.

@@ -1,35 +1,37 @@
 <!doctype html>
+<!-- pwa-kit: updates/public/reset.html v4 -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Reloading</title>
     <meta name="robots" content="noindex" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/icon-192.png" type="image/png" />
     <style>
       html, body { height: 100%; margin: 0; }
-      /* No CSS tokens here on purpose: this page must not depend on
-         anything cached, so the colors are just Angel's own hardcoded. */
+      /* Seams: lang/dir, title, the two strings, and these three colours
+         (page background, text, link) - match the app's own. No CSS tokens
+         here on purpose: this page must not depend on anything cached. */
       body {
         display: grid;
         place-items: center;
-        background: #1e1e2e;
-        color: #cdd6f4;
+        background: #faf6f0;
+        color: #6b5b50;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
         text-align: center;
         padding: 24px;
       }
       p { margin: 0 0 12px; font-size: 1.05rem; line-height: 1.5; }
-      a { color: #6366f1; }
+      a { color: #3d5a40; }
       .hidden { display: none; }
     </style>
   </head>
   <body>
     <!--
       Escape hatch for a stuck app: this page is never precached and never
-      served by the service worker (see pwa-build.ts), so it always comes
+      served by the service worker (see build/pwa-build.ts), so it always comes
       fresh from the network. It forgets the worker and every cache, then
-      loads the app again from scratch. localStorage (the PIN) is kept.
+      loads the app again from scratch. localStorage (login) is kept.
     -->
     <div>
       <p id="busy">Reloading the app...</p>

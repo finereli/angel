@@ -1,17 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { angel } from '../streamManager';
-  import type { ConversationState } from '../streamManager';
+  import { angel } from '../lib/streamManager.svelte';
   import { renderMarkdown, dayKey, dateLabel, timeLabel } from '../util';
-
-  export let conversationId: string;
-
-  let messageText = '';
-  let messagesEl: HTMLDivElement;
-  let textareaEl: HTMLTextAreaElement;
-  let unsub: (() => void) | null = null;
-  let convState: ConversationState;
-  let userHasScrolledUp = false;
 
   // Small text attachments: read client-side, inlined into the message, bytes
   // discarded. No upload, no storage - the file's text becomes part of what Angel
@@ -31,14 +21,45 @@
   ]);
 
   interface Attachment { name: string; size: number; text: string }
-  let attachments: Attachment[] = [];
-  let fileInputEl: HTMLInputElement;
-  let attachError = '';
-
   // Long input stored as an out-of-context document. It's uploaded on attach; the
   // real id arrives via onDocAdded. On send its pointer is folded into the message.
   interface PendingDoc { clientDocId: string; title: string; lines: number; status: 'uploading' | 'ready'; id?: string }
-  let pendingDocs: PendingDoc[] = [];
+
+  // One agent, one conversation: the id comes from the agent, not a prop.
+  const convId = $derived(angel.agent?.conversationId ?? '')
+  const conv = $derived(convId ? angel.convStates[convId] : undefined)
+  const streaming = $derived(conv?.streamState === 'streaming');
+
+  let messageText = $state('');
+  let attachments = $state<Attachment[]>([]);
+  let pendingDocs = $state<PendingDoc[]>([]);
+  let attachError = $state('');
+  let userHasScrolledUp = $state(false);
+
+  let messagesEl = $state<HTMLDivElement | undefined>();
+  let textareaEl = $state<HTMLTextAreaElement | undefined>();
+  let fileInputEl = $state<HTMLInputElement | undefined>();
+
+  // "Waiting on the API" indicator (ported from Glopus). The socket can be open and
+  // the stream live while nothing comes back for seconds at a time - a provider
+  // stall, a backoff retry, the gap between rounds. We track when the stream last
+  // advanced (streamSeq changing) and, if it's been quiet past a threshold, say so.
+  // We also show total elapsed since the turn began, so a long silence has a number.
+  let lastActivity = $state(Date.now());
+  let now = $state(Date.now());
+  let lastSeq = -1;
+
+  const elapsedSeconds = $derived(streaming && conv?.streamStartTime ? Math.floor((now - conv.streamStartTime) / 1000) : 0);
+  const lastPart = $derived(conv?.streamParts?.[conv.streamParts.length - 1]);
+  const lastIsActiveTool = $derived(!!lastPart && lastPart.type === 'tool' && lastPart.result === undefined);
+  const waitingOnApi = $derived(streaming && (conv?.streamParts?.length ?? 0) > 0 && !lastIsActiveTool && (now - lastActivity) > 1500);
+  const canSend = $derived((messageText.trim().length > 0 || attachments.length > 0 || pendingDocs.length > 0) && !pendingDocs.some(d => d.status === 'uploading'));
+
+  $effect(() => {
+    const seq = conv?.streamSeq;
+    if (seq === undefined) return;
+    if (seq !== lastSeq) { lastSeq = seq; lastActivity = Date.now(); }
+  });
 
   function isTextFile(name: string, type: string): boolean {
     const dot = name.lastIndexOf('.');
@@ -98,7 +119,7 @@
     const clientDocId = crypto.randomUUID();
     const lines = text.split('\n').length;
     pendingDocs = [...pendingDocs, { clientDocId, title, lines, status: 'uploading' }];
-    angel.addDocument(conversationId, clientDocId, title, text);
+    angel.addDocument(convId, clientDocId, title, text);
   }
 
   function removePendingDoc(clientDocId: string) {
@@ -162,66 +183,48 @@
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
   }
 
-  $: convState = angel.getConvState(conversationId);
-  $: streaming = convState?.streamState === 'streaming';
-  $: connState = angel.getConnState();
+  // Draft persistence (kit behavior.md: appname.draft.{conversationId}, 300ms).
+  function draftKey(id: string): string { return `angel.draft.${id}`; }
 
-  // "Waiting on the API" indicator (ported from Glopus). The socket can be open and
-  // the stream live while nothing comes back for seconds at a time - a provider
-  // stall, a backoff retry, the gap between rounds. We track when the stream last
-  // advanced (streamSeq changing) and, if it's been quiet past a threshold, say so.
-  // We also show total elapsed since the turn began, so a long silence has a number.
-  let lastActivity = Date.now();
-  let lastSeq = -1;
-  let now = Date.now();
-  $: if (convState && convState.streamSeq !== lastSeq) { lastSeq = convState.streamSeq; lastActivity = Date.now(); }
-  $: elapsedSeconds = (streaming && convState?.streamStartTime) ? Math.floor((now - convState.streamStartTime) / 1000) : 0;
-  $: lastPart = convState?.streamParts?.[convState.streamParts.length - 1];
-  $: lastIsActiveTool = !!lastPart && lastPart.type === 'tool' && lastPart.result === undefined;
-  // A tool mid-execution already shows its own spinner - don't stack a second one.
-  $: waitingOnApi = streaming && (convState?.streamParts?.length ?? 0) > 0 && !lastIsActiveTool && (now - lastActivity) > 1500;
-
-  // Draft persistence
-  function saveDraft() {
-    if (messageText.trim()) {
-      localStorage.setItem(`angel-draft-${conversationId}`, messageText);
-    } else {
-      localStorage.removeItem(`angel-draft-${conversationId}`);
-    }
+  function saveDraft(id: string) {
+    if (!id) return;
+    if (messageText.trim()) localStorage.setItem(draftKey(id), messageText);
+    else localStorage.removeItem(draftKey(id));
   }
 
-  function loadDraft() {
-    messageText = localStorage.getItem(`angel-draft-${conversationId}`) || '';
-    tick().then(autoResize);
+  let draftTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleDraftSave() {
+    if (!convId) return;
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => saveDraft(convId), 300);
   }
 
-  let prevConvId: string | undefined;
-  $: if (conversationId !== prevConvId) {
-    if (prevConvId) saveDraft();
-    prevConvId = conversationId;
+  // Reset per-conversation state when the conversation id arrives/changes.
+  let prevConvId = '';
+  $effect(() => {
+    if (!convId || convId === prevConvId) return;
+    if (prevConvId) saveDraft(prevConvId);
+    prevConvId = convId;
     attachments = [];
     pendingDocs = [];
     attachError = '';
     userHasScrolledUp = false;
-    loadDraft();
-    tick().then(scrollToBottom);
-  }
+    messageText = localStorage.getItem(draftKey(convId)) || '';
+    tick().then(() => { autoResize(); scrollToBottom(); });
+  });
 
-  let unsubDoc: (() => void) | null = null;
+  // Keep the scroller pinned while a reply streams in, unless the user scrolled up.
+  $effect(() => {
+    void conv?.messages.length;
+    void conv?.streamParts.length;
+    if (!userHasScrolledUp) tick().then(scrollToBottom);
+  });
+
   let thinkTimer: ReturnType<typeof setInterval> | null = null;
 
   onMount(() => {
     thinkTimer = setInterval(() => { if (streaming) now = Date.now(); }, 500);
-    let firstLoad = true;
-    unsub = angel.subscribe(() => {
-      convState = angel.getConvState(conversationId);
-      connState = angel.getConnState();
-      if (firstLoad || !userHasScrolledUp) {
-        firstLoad = false;
-        tick().then(scrollToBottom);
-      }
-    });
-    unsubDoc = angel.onDocAdded((d) => {
+    const unsubDoc = angel.onDocAdded((d) => {
       if (d.error) {
         const failed = pendingDocs.find(p => p.clientDocId === d.clientDocId);
         if (failed) attachError = `Couldn't store "${failed.title}": ${d.error}`;
@@ -230,25 +233,23 @@
       }
       pendingDocs = pendingDocs.map(p =>
         p.clientDocId === d.clientDocId
-          ? { ...p, status: 'ready', id: d.id, title: d.title ?? p.title, lines: d.lineCount ?? p.lines }
+          ? { ...p, status: 'ready' as const, id: d.id, title: d.title ?? p.title, lines: d.lineCount ?? p.lines }
           : p
       );
     });
-    angel.loadConversation(conversationId);
-    loadDraft();
+    return () => {
+      unsubDoc();
+      if (thinkTimer) clearInterval(thinkTimer);
+    };
   });
 
   onDestroy(() => {
-    unsub?.();
-    unsubDoc?.();
-    if (thinkTimer) clearInterval(thinkTimer);
-    saveDraft();
+    if (draftTimer) clearTimeout(draftTimer);
+    if (prevConvId) saveDraft(prevConvId);
   });
 
   function scrollToBottom() {
-    if (messagesEl) {
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
+    if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function handleScroll() {
@@ -275,15 +276,13 @@
   }
 
   function sendMessage() {
-    if (streaming) return;
-    if (pendingDocs.some(d => d.status === 'uploading')) return; // wait for the doc id
-    if (!messageText.trim() && attachments.length === 0 && pendingDocs.length === 0) return;
-    angel.sendChat(conversationId, buildContent());
+    if (streaming || !canSend) return;
+    angel.sendChat(convId, buildContent());
     messageText = '';
     attachments = [];
     pendingDocs = [];
     attachError = '';
-    localStorage.removeItem(`angel-draft-${conversationId}`);
+    localStorage.removeItem(draftKey(convId));
     userHasScrolledUp = false;
     tick().then(() => {
       if (textareaEl) textareaEl.style.height = 'auto';
@@ -292,7 +291,7 @@
   }
 
   function stopStream() {
-    angel.stopStream(conversationId);
+    angel.stopStream(convId);
   }
 
   function autoResize() {
@@ -321,17 +320,17 @@
 
 <div class="chat">
   <!-- Connection banner -->
-  {#if connState === 'reconnecting'}
+  {#if angel.connState === 'reconnecting'}
     <div class="banner warn">Reconnecting...</div>
   {/if}
-  {#if convState?.error}
-    <div class="banner error">{convState.error}</div>
+  {#if conv?.error}
+    <div class="banner error">{conv.error}</div>
   {/if}
 
-  <div class="messages" bind:this={messagesEl} on:scroll={handleScroll}>
-    {#if convState}
-      {#each convState.messages as msg, i (msg.id)}
-        {#if i === 0 || dayKey(msg.created_at) !== dayKey(convState.messages[i - 1].created_at)}
+  <div class="messages" bind:this={messagesEl} onscroll={handleScroll}>
+    {#if conv}
+      {#each conv.messages as msg, i (msg.id)}
+        {#if i === 0 || dayKey(msg.created_at) !== dayKey(conv.messages[i - 1]!.created_at)}
           <div class="date-line"><span>{dateLabel(msg.created_at)}</span></div>
         {/if}
         {#if msg.role === 'user' && msg.content.startsWith('<system>')}
@@ -396,10 +395,10 @@
       {/each}
 
       <!-- Streaming content -->
-      {#if streaming && convState.streamParts.length > 0}
+      {#if streaming && conv.streamParts.length > 0}
         <div class="message assistant streaming">
           <div class="message-content prose">
-            {#each convState.streamParts as part}
+            {#each conv.streamParts as part}
               {#if part.type === 'text'}
                 {@html renderMarkdown(part.content)}
               {:else}
@@ -446,7 +445,7 @@
           <div class="attach-card">
             <div class="attach-card-head">
               <span class="attach-card-meta">{attachMeta(a)}</span>
-              <button class="chip-x" on:click={() => removeAttachment(i)} title="Remove">×</button>
+              <button class="chip-x" onclick={() => removeAttachment(i)} title="Remove">×</button>
             </div>
             <pre class="attach-card-preview">{attachPreview(a.text)}</pre>
           </div>
@@ -463,7 +462,7 @@
               <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M3 2.5A1.5 1.5 0 0 1 4.5 1H12a1 1 0 0 1 1 1v11.5a.5.5 0 0 1-.5.5H4.5A1.5 1.5 0 0 1 3 12.5v-10zM4.5 12a.5.5 0 0 0 0 1H12v-1H4.5z"/></svg>
               {d.title} · {d.lines} lines to read
             {/if}
-            <button class="chip-x" on:click={() => removePendingDoc(d.clientDocId)} title="Remove">×</button>
+            <button class="chip-x" onclick={() => removePendingDoc(d.clientDocId)} title="Remove">×</button>
           </span>
         {/each}
       </div>
@@ -472,28 +471,24 @@
       <textarea
         bind:this={textareaEl}
         bind:value={messageText}
-        on:keydown={handleKeydown}
-        on:paste={handlePaste}
-        on:input={() => { autoResize(); saveDraft(); }}
+        onkeydown={handleKeydown}
+        onpaste={handlePaste}
+        oninput={() => { autoResize(); scheduleDraftSave(); }}
         placeholder=""
         rows="1"
       ></textarea>
       <div class="composer-actions">
-        <input type="file" multiple bind:this={fileInputEl} on:change={handleFileSelect} style="display:none" />
-        <button class="attach-btn" on:click={() => fileInputEl.click()} disabled={streaming} title="Attach a text file">
+        <input type="file" multiple bind:this={fileInputEl} onchange={handleFileSelect} style="display:none" />
+        <button class="attach-btn" onclick={() => fileInputEl?.click()} disabled={streaming} title="Attach a text file">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
         <div class="composer-spacer"></div>
         {#if streaming}
-          <button class="send-btn stop" on:click={stopStream} title="Stop">
+          <button class="send-btn stop" onclick={stopStream} title="Stop">
             <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
           </button>
         {:else}
-          <button
-            class="send-btn"
-            on:click={sendMessage}
-            disabled={(!messageText.trim() && attachments.length === 0 && pendingDocs.length === 0) || pendingDocs.some(d => d.status === 'uploading')}
-          >
+          <button class="send-btn" onclick={sendMessage} disabled={!canSend} aria-label="Send" title="Send">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
           </button>
         {/if}
@@ -505,9 +500,9 @@
 <style>
   .chat {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    min-height: 0;
   }
 
   .banner {
@@ -642,7 +637,7 @@
   .tool-check {
     width: 12px;
     height: 12px;
-    color: #22c55e;
+    color: var(--ok);
     flex-shrink: 0;
   }
 
@@ -774,9 +769,9 @@
   /* A stored document reads differently from an inlined file - tinted, and it
      names how much there is to read rather than previewing it. */
   .doc-chip {
-    background: var(--accent-soft, rgba(99, 102, 241, 0.12));
-    color: var(--accent, #4f46e5);
-    border-color: var(--accent, #4f46e5);
+    background: var(--accent-soft);
+    color: var(--accent-deep);
+    border-color: var(--accent);
   }
   .doc-pending-row {
     display: flex;
@@ -791,7 +786,7 @@
   .attach-error {
     margin: 0 0 8px;
     font-size: 0.78rem;
-    color: #ef4444;
+    color: var(--danger);
   }
 
   .attach-btn {

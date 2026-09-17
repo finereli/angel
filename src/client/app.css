@@ -1,58 +1,11 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import '$shared/css/base.css';
 
-:root {
-  --accent: #6366f1;
-  --bg-surface: #ffffff;
-  --bg-sidebar: #f8f9fa;
-  --bg-hover: #f1f3f5;
-  --bg-active: #e9ecef;
-  --bg-message: #f1f3f5;
-  --bg-code: #f1f3f5;
-  --bg-input: #ffffff;
-  --border: #e5e7eb;
-  --text-primary: #1a1a1a;
-  --text-secondary: #6b7280;
-
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --vh: 1vh;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
+/* Markdown/prose rendering for assistant messages (reference/visual.md). */
+.prose {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.5;
 }
-
-.dark {
-  --bg-surface: #1e1e2e;
-  --bg-sidebar: #181825;
-  --bg-hover: #313244;
-  --bg-active: #45475a;
-  --bg-message: #313244;
-  --bg-code: #181825;
-  --bg-input: #313244;
-  --border: #45475a;
-  --text-primary: #cdd6f4;
-  --text-secondary: #a6adc8;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-html, body, #app {
-  height: 100dvh;
-  overflow: hidden;
-}
-
-body {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  overscroll-behavior: none;
-}
-
-/* Prose styles for markdown rendering */
 .prose p { margin: 0.4em 0; }
 .prose p:first-child { margin-top: 0; }
 .prose p:last-child { margin-bottom: 0; }

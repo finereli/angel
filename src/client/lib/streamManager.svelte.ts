@@ -1,6 +1,6 @@
 import type {
   ClientMsg, ServerMsg, MessageRow, StreamSnapshot, StreamPart, AgentInfo,
-} from '../worker/types'
+} from '../../worker/types'
 
 export type { StreamPart }
 
@@ -17,7 +17,6 @@ export interface ConversationState {
   error: string | null
 }
 
-type Listener = () => void
 // A document upload's resolution: its server-side id, or an error.
 export interface DocAdded {
   conversationId: string
@@ -28,6 +27,8 @@ export interface DocAdded {
   error?: string
 }
 type DocListener = (d: DocAdded) => void
+
+const PIN_KEY = 'angel.pin.v1'
 
 let nextMsgKey = -1
 
@@ -52,22 +53,28 @@ function localMessage(
   }
 }
 
+// The one WebSocket client. State is rune-based, so components read `angel.x`
+// directly and re-render; there is no subscribe() layer. The PIN is the
+// credential (kit pin-auth convention): stored raw, replayed on every connect,
+// cleared when the server rejects it.
 class AngelClient {
-  private ws: WebSocket | null = null
-  private pin: string = ''
-  private connState: ConnState = 'disconnected'
-  private agent: AgentInfo | null = null
-  private convStates = new Map<string, ConversationState>()
-  private listeners = new Set<Listener>()
-  private docListeners = new Set<DocListener>()
-  private reconnectDelay = 1000
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  private pingInterval: ReturnType<typeof setInterval> | null = null
-  private pongTimeout: ReturnType<typeof setTimeout> | null = null
-  private pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
-  private agentLoaded = false
-  private loadedConversations = new Set<string>()
-  private settingsError: string | null = null
+  pin = $state<string | null>(null)
+  connState = $state<ConnState>('disconnected')
+  agent = $state<AgentInfo | null>(null)
+  agentLoaded = $state(false)
+  settingsError = $state<string | null>(null)
+  convStates = $state<Record<string, ConversationState>>({})
+
+  #ws: WebSocket | null = null
+  #docListeners = new Set<DocListener>()
+  #reconnectDelay = 1000
+  #reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  #pingInterval: ReturnType<typeof setInterval> | null = null
+  #pongTimeout: ReturnType<typeof setTimeout> | null = null
+  #pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
+  #loadedConversations = new Set<string>()
+  #pinResolve: ((ok: boolean) => void) | null = null
+  #candidatePin: string | null = null
 
   constructor() {
     // Visibility-change reconnect: bypass throttled timers on mobile.
@@ -87,122 +94,143 @@ class AngelClient {
     }
   }
 
-  getConnState(): ConnState { return this.connState }
-  getAgent(): AgentInfo | null { return this.agent }
-  hasLoadedAgent(): boolean { return this.agentLoaded }
-  getSettingsError(): string | null { return this.settingsError }
+  get signedIn(): boolean { return this.pin !== null }
 
-  updateSettings(model: string | null, reasoningEffort: string | null) {
-    this.settingsError = null
-    this.send({ type: 'settings:set', model, reasoningEffort })
+  // Optimistic boot: a stored PIN shows the app immediately; the first
+  // auth:fail clears it and drops back to the keypad.
+  boot() {
+    const saved = localStorage.getItem(PIN_KEY)
+    if (saved) {
+      this.pin = saved
+      this.doConnect()
+    }
+  }
+
+  // PIN keypad submit: connect and resolve true only once the server accepts.
+  // The candidate is not promoted to `pin` until auth:ok, so the keypad stays
+  // mounted (and can shake) while the check is in flight.
+  submit(pin: string): Promise<boolean> {
+    this.#candidatePin = pin
+    return new Promise((resolve) => {
+      this.#pinResolve = resolve
+      this.doConnect()
+      setTimeout(() => {
+        if (this.#pinResolve === resolve) {
+          this.#pinResolve = null
+          this.#candidatePin = null
+          resolve(false)
+        }
+      }, 8000)
+    })
+  }
+
+  signOut() {
+    localStorage.removeItem(PIN_KEY)
+    this.disconnect()
+    this.pin = null
   }
 
   getConvState(id: string): ConversationState {
-    if (!this.convStates.has(id)) {
-      this.convStates.set(id, {
+    if (!this.convStates[id]) {
+      this.convStates[id] = {
         messages: [],
         streamState: 'idle',
         streamParts: [],
         streamSeq: 0,
         streamStartTime: 0,
         error: null,
-      })
+      }
     }
-    return this.convStates.get(id)!
+    return this.convStates[id]
   }
 
-  subscribe(fn: Listener): () => void {
-    this.listeners.add(fn)
-    return () => this.listeners.delete(fn)
+  updateSettings(model: string | null, reasoningEffort: string | null) {
+    this.settingsError = null
+    this.send({ type: 'settings:set', model, reasoningEffort })
   }
 
   // A stored document resolved server-side (its real id is now known).
   onDocAdded(fn: DocListener): () => void {
-    this.docListeners.add(fn)
-    return () => this.docListeners.delete(fn)
-  }
-
-  private notify() {
-    for (const fn of this.listeners) {
-      try { fn() } catch {}
-    }
-  }
-
-  connect(pin: string) {
-    this.pin = pin
-    this.doConnect()
+    this.#docListeners.add(fn)
+    return () => this.#docListeners.delete(fn)
   }
 
   disconnect() {
     this.connState = 'disconnected'
     this.stopPing()
     this.clearReconnectTimer()
-    this.loadedConversations.clear()
-    if (this.ws) {
-      this.ws.close(1000, 'Client disconnect')
-      this.ws = null
+    this.#loadedConversations.clear()
+    if (this.#ws) {
+      this.#ws.close(1000, 'Client disconnect')
+      this.#ws = null
     }
-    this.notify()
   }
 
   private clearReconnectTimer() {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
+    if (this.#reconnectTimer) {
+      clearTimeout(this.#reconnectTimer)
+      this.#reconnectTimer = null
     }
   }
 
   private doConnect() {
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
+    if (this.#ws) {
+      this.#ws.close()
+      this.#ws = null
     }
 
     this.connState = 'connecting'
-    this.notify()
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    this.ws = new WebSocket(`${proto}//${location.host}/ws`)
+    this.#ws = new WebSocket(`${proto}//${location.host}/ws`)
 
-    this.ws.onopen = () => {
+    this.#ws.onopen = () => {
       this.connState = 'authenticating'
-      this.notify()
-      this.send({ type: 'auth', pin: this.pin })
+      this.send({ type: 'auth', pin: this.pin ?? this.#candidatePin ?? '' })
     }
 
-    this.ws.onmessage = (event) => {
+    this.#ws.onmessage = (event) => {
       let msg: ServerMsg
       try { msg = JSON.parse(event.data) } catch { return }
       this.handleMessage(msg)
     }
 
-    this.ws.onclose = () => {
+    this.#ws.onclose = () => {
       this.stopPing()
-      this.loadedConversations.clear()
+      this.#loadedConversations.clear()
       if (this.connState !== 'disconnected') {
         this.connState = 'reconnecting'
-        this.notify()
         this.clearReconnectTimer()
-        this.reconnectTimer = setTimeout(() => {
+        this.#reconnectTimer = setTimeout(() => {
           if (this.connState === 'reconnecting') {
             this.doConnect()
           }
-        }, this.reconnectDelay)
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000)
+        }, this.#reconnectDelay)
+        this.#reconnectDelay = Math.min(this.#reconnectDelay * 2, 30000)
       }
     }
 
-    this.ws.onerror = () => {}
+    this.#ws.onerror = () => {}
   }
 
   private handleMessage(msg: ServerMsg) {
     switch (msg.type) {
       case 'auth:ok': {
         this.connState = 'connected'
-        this.reconnectDelay = 1000
+        this.#reconnectDelay = 1000
         this.startPing()
         this.agent = msg.agent
         this.agentLoaded = true
+        if (this.#candidatePin) {
+          this.pin = this.#candidatePin
+          this.#candidatePin = null
+        }
+        if (this.pin) localStorage.setItem(PIN_KEY, this.pin)
+        if (this.#pinResolve) {
+          const resolve = this.#pinResolve
+          this.#pinResolve = null
+          resolve(true)
+        }
         const activeIds = new Set(msg.activeStreams.map(s => s.conversationId))
         const pendingIds = new Set(msg.pendingTurns || [])
         for (const snapshot of msg.activeStreams) {
@@ -225,7 +253,7 @@ class AngelClient {
         }
         // A stream that ended while we were disconnected: clear its stale
         // streaming state (the eager reload below fetches the finished reply).
-        for (const [convId, state] of this.convStates) {
+        for (const [convId, state] of Object.entries(this.convStates)) {
           if (state.streamState === 'streaming' && !activeIds.has(convId) && !pendingIds.has(convId)) {
             state.streamState = 'idle'
             state.streamParts = []
@@ -233,37 +261,44 @@ class AngelClient {
             state.streamStartTime = 0
           }
         }
-        if (this.pendingSend) {
+        if (this.#pendingSend) {
           this.send({
             type: 'chat',
-            conversationId: this.pendingSend.conversationId,
-            clientMsgId: this.pendingSend.clientMsgId,
-            content: this.pendingSend.content,
+            conversationId: this.#pendingSend.conversationId,
+            clientMsgId: this.#pendingSend.clientMsgId,
+            content: this.#pendingSend.content,
           })
         }
-        if (msg.agent && !this.loadedConversations.has(msg.agent.conversationId)) {
+        if (msg.agent && !this.#loadedConversations.has(msg.agent.conversationId)) {
           this.send({ type: 'conv:load', conversationId: msg.agent.conversationId })
         }
-        this.notify()
         break
       }
 
-      case 'auth:fail':
+      case 'auth:fail': {
         this.connState = 'disconnected'
-        this.notify()
+        localStorage.removeItem(PIN_KEY)
+        this.pin = null
+        this.#candidatePin = null
+        if (this.#pinResolve) {
+          const resolve = this.#pinResolve
+          this.#pinResolve = null
+          resolve(false)
+        }
         break
+      }
 
       case 'pong':
-        if (this.pongTimeout) {
-          clearTimeout(this.pongTimeout)
-          this.pongTimeout = null
+        if (this.#pongTimeout) {
+          clearTimeout(this.#pongTimeout)
+          this.#pongTimeout = null
         }
         break
 
       case 'conv:messages': {
         const state = this.getConvState(msg.conversationId)
         state.messages = msg.messages
-        this.loadedConversations.add(msg.conversationId)
+        this.#loadedConversations.add(msg.conversationId)
         if (msg.stream) {
           state.streamState = 'streaming'
           if (!state.streamStartTime) state.streamStartTime = Date.now()
@@ -276,7 +311,6 @@ class AngelClient {
           state.streamSeq = 0
           state.streamStartTime = Date.now()
         }
-        this.notify()
         break
       }
 
@@ -285,20 +319,19 @@ class AngelClient {
         // Already known (a reload raced the confirmation, or a resend was
         // re-confirmed) - appending again would duplicate a keyed row.
         if (state.messages.some(m => m.id === msg.messageId)) {
-          this.pendingSend = null
-          this.notify()
+          this.#pendingSend = null
           break
         }
         const confirmed = localMessage(msg.conversationId, 'user', msg.content, { id: msg.messageId })
         const optIdx = state.messages.findIndex(m => m.id < 0 && m.role === 'user')
         if (optIdx >= 0) {
-          state.messages = [...state.messages]
-          state.messages[optIdx] = confirmed
+          const messages = [...state.messages]
+          messages[optIdx] = confirmed
+          state.messages = messages
         } else {
           state.messages = [...state.messages, confirmed]
         }
-        this.pendingSend = null
-        this.notify()
+        this.#pendingSend = null
         break
       }
 
@@ -310,7 +343,6 @@ class AngelClient {
         state.streamSeq = msg.seq
         state.streamState = 'streaming'
         if (!state.streamStartTime) state.streamStartTime = Date.now()
-        this.notify()
         break
       }
 
@@ -328,7 +360,6 @@ class AngelClient {
           }
           state.streamParts = [...parts]
           state.streamSeq = msg.seq
-          this.notify()
         }
         break
       }
@@ -342,7 +373,6 @@ class AngelClient {
             type: 'tool', id: msg.id, name: msg.name, label: msg.label,
           }]
           state.streamSeq = msg.seq
-          this.notify()
         }
         break
       }
@@ -354,7 +384,6 @@ class AngelClient {
             p.type === 'tool' && p.id === msg.id ? { ...p, result: msg.result, label: msg.label || p.label } : p
           )
           state.streamSeq = msg.seq
-          this.notify()
         }
         break
       }
@@ -375,36 +404,29 @@ class AngelClient {
         state.streamParts = []
         state.streamSeq = 0
         state.streamStartTime = 0
-        this.notify()
         break
       }
 
-      case 'agent:updated': {
+      case 'agent:updated':
         this.agent = msg.agent
         this.settingsError = null
-        this.notify()
         break
-      }
 
-      case 'settings:error': {
+      case 'settings:error':
         this.settingsError = msg.message
-        this.notify()
         break
-      }
 
-      case 'doc:added': {
-        for (const fn of this.docListeners) {
+      case 'doc:added':
+        for (const fn of this.#docListeners) {
           try { fn(msg) } catch {}
         }
         break
-      }
 
-      case 'doc:error': {
-        for (const fn of this.docListeners) {
+      case 'doc:error':
+        for (const fn of this.#docListeners) {
           try { fn({ conversationId: msg.conversationId, clientDocId: msg.clientDocId, error: msg.message }) } catch {}
         }
         break
-      }
 
       case 'error': {
         const state = this.getConvState(msg.conversationId)
@@ -423,12 +445,8 @@ class AngelClient {
         state.streamStartTime = 0
         state.error = msg.message
         setTimeout(() => {
-          if (state.error === msg.message) {
-            state.error = null
-            this.notify()
-          }
+          if (state.error === msg.message) state.error = null
         }, 8000)
-        this.notify()
         break
       }
     }
@@ -445,10 +463,9 @@ class AngelClient {
     state.streamStartTime = Date.now()
     state.error = null
 
-    this.pendingSend = { conversationId, content, clientMsgId }
-    this.notify()
+    this.#pendingSend = { conversationId, content, clientMsgId }
 
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.#ws?.readyState === WebSocket.OPEN) {
       this.send({ type: 'chat', conversationId, clientMsgId, content })
     }
   }
@@ -460,11 +477,7 @@ class AngelClient {
   }
 
   loadConversation(id: string) {
-    if (this.loadedConversations.has(id)) {
-      // Already loaded — serve from cache, notify to trigger re-render
-      this.notify()
-      return
-    }
+    if (this.#loadedConversations.has(id)) return
     this.send({ type: 'conv:load', conversationId: id })
   }
 
@@ -473,21 +486,21 @@ class AngelClient {
   }
 
   private send(msg: ClientMsg) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg))
+    if (this.#ws?.readyState === WebSocket.OPEN) {
+      this.#ws.send(JSON.stringify(msg))
     }
   }
 
   private startPing() {
     this.stopPing()
     // Tighter heartbeat: a silent drop surfaces in ~15s worst case instead of ~35s.
-    this.pingInterval = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
+    this.#pingInterval = setInterval(() => {
+      if (this.#ws?.readyState === WebSocket.OPEN) {
         this.send({ type: 'ping', ts: Date.now() })
-        if (!this.pongTimeout) {
-          this.pongTimeout = setTimeout(() => {
-            this.pongTimeout = null
-            this.ws?.close()
+        if (!this.#pongTimeout) {
+          this.#pongTimeout = setTimeout(() => {
+            this.#pongTimeout = null
+            this.#ws?.close()
           }, 5_000)
         }
       }
@@ -495,8 +508,8 @@ class AngelClient {
   }
 
   private stopPing() {
-    if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null }
-    if (this.pongTimeout) { clearTimeout(this.pongTimeout); this.pongTimeout = null }
+    if (this.#pingInterval) { clearInterval(this.#pingInterval); this.#pingInterval = null }
+    if (this.#pongTimeout) { clearTimeout(this.#pongTimeout); this.#pongTimeout = null }
   }
 
   // The browser knows the network died before any heartbeat can: reflect it instantly.
@@ -504,15 +517,14 @@ class AngelClient {
     if (this.connState === 'connected' || this.connState === 'connecting' || this.connState === 'authenticating') {
       this.connState = 'reconnecting'
       this.stopPing()
-      if (this.ws) { try { this.ws.close() } catch {} this.ws = null }
-      this.notify()
+      if (this.#ws) { try { this.#ws.close() } catch {} this.#ws = null }
     }
   }
 
   private handleOnline() {
     if (this.pin && this.connState !== 'connected' && this.connState !== 'connecting' && this.connState !== 'authenticating') {
       this.clearReconnectTimer()
-      this.reconnectDelay = 1000
+      this.#reconnectDelay = 1000
       this.doConnect()
     }
   }

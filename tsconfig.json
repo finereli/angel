@@ -9,8 +9,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "types": ["@cloudflare/workers-types", "svelte"]
+    "noEmit": true,
+    "isolatedModules": true,
+    "types": ["@cloudflare/workers-types", "vite/client", "svelte", "node"],
+    "paths": { "$shared/*": ["./shared/*"] }
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "shared/**/*.ts", "shared/**/*.svelte", "vite.config.ts"],
+  "exclude": ["src/**/*.test.ts", "node_modules", "dist"]
 }

@@ -1,4 +1,4 @@
-<!-- Adapted from the pwa skill's updates kit item (ui/ResetButton.svelte). -->
+<!-- pwa-kit: updates/ui/ResetButton.svelte v4 -->
 <script lang="ts">
   // The drawer's reload control, drawn as the Material "autorenew" glyph.
   // Two jobs, one icon: normally it is the manual escape hatch (forget the
@@ -6,20 +6,22 @@
   // already installed and waiting for a quiet moment it lights up in the
   // accent colour and a tap simply reloads into it (updates.apply()). It
   // spins while a reset runs so the tap visibly did something.
-  import { updates, updateAvailable, resetting } from './updates'
+  // Seams: the two labels (updateLabel is an imperative - "tap to update";
+  // resetLabel names the action - "reload").
+  import { updates } from '../lib/updates.svelte'
 
-  export let updateLabel = 'Tap to update'
-  export let resetLabel = 'Reload'
-  $: label = $updateAvailable ? updateLabel : resetLabel
+  let { tabindex = 0, updateLabel = 'Tap to update', resetLabel = 'Reload' }: { tabindex?: number; updateLabel?: string; resetLabel?: string } = $props()
+  const label = $derived(updates.available ? updateLabel : resetLabel)
 </script>
 
 <button
   class="reset-btn"
-  class:pending={$updateAvailable}
-  class:busy={$resetting}
-  on:click={() => ($updateAvailable ? updates.apply() : updates.reset())}
+  class:pending={updates.available}
+  class:busy={updates.resetting}
+  onclick={() => (updates.available ? updates.apply() : updates.reset())}
   aria-label={label}
   title={label}
+  {tabindex}
 >
   <svg width="16" height="16" viewBox="0 0 960 960" fill="currentColor" aria-hidden="true">
     <path
@@ -41,12 +43,10 @@
     opacity: 0.6;
     vertical-align: middle;
     transition: color 0.15s, opacity 0.15s;
-    background: none;
-    border: none;
-    cursor: pointer;
   }
-  .reset-btn:hover { color: var(--accent); opacity: 1; }
+  .reset-btn:hover { color: var(--accent-deep, var(--accent)); opacity: 1; }
   .pending { color: var(--accent); opacity: 1; }
+  .pending:hover { color: var(--accent-deep, var(--accent)); }
   .busy svg { animation: spin 0.9s linear infinite; }
   @keyframes spin {
     to { transform: rotate(360deg); }

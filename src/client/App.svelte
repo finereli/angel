@@ -1,349 +1,140 @@
+<!-- pwa-kit: shell/src/App.svelte v6 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import { angel } from './streamManager';
-  import Login from './pages/Login.svelte';
-  import Chat from './pages/Chat.svelte';
-  import Settings from './pages/Settings.svelte';
-  import ResetButton from './ResetButton.svelte';
+  // Shell: login gate, top bar, one scrolling body, drawer, toasts. Views are
+  // Angel's own (the one conversation, settings).
+  import TopBar from '$shared/ui/TopBar.svelte'
+  import Drawer from '$shared/ui/Drawer.svelte'
+  import Toast from '$shared/ui/Toast.svelte'
+  import ResetButton from '$shared/ui/ResetButton.svelte'
+  import InstallBanner from '$shared/ui/InstallBanner.svelte'
+  import PinLogin from '$shared/ui/PinLogin.svelte'
+  import Chat from './pages/Chat.svelte'
+  import Settings from './pages/Settings.svelte'
+  import { angel } from './lib/streamManager.svelte'
+  import { router } from './lib/router.svelte'
+  import { isDark, setDarkMode } from '$shared/lib/theme'
 
-  let connState = angel.getConnState();
-  let agent = angel.getAgent();
-  let currentChatId: string | null = null;
-  let menuOpen = false;
-  let darkMode = false;
-  let agentLoaded = angel.hasLoadedAgent();
-  let view: 'chat' | 'settings' = 'chat';
+  router.start()
 
-  let unsub: (() => void) | null = null;
-  let busy = false;
+  let menuOpen = $state(false)
+  // Closing the drawer on navigation matters for the back button too, not just
+  // for taps inside it.
+  router.onChange(() => (menuOpen = false))
 
-  $: agentName = agent?.name || 'Angel';
+  const view = $derived(router.route.view)
+  const agentName = $derived(angel.agent?.name || 'Angel')
+  const title = $derived(view === 'settings' ? 'Settings' : agentName)
+  const entries = $derived([
+    { label: agentName, hash: '/chat', current: view === 'chat' },
+    { label: 'Settings', hash: '/settings', current: view === 'settings' },
+  ])
 
-  onMount(() => {
-    darkMode = localStorage.getItem('darkMode') === 'true' ||
-      (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    applyDarkMode(darkMode);
-
-    unsub = angel.subscribe(() => {
-      connState = angel.getConnState();
-      agent = angel.getAgent();
-      agentLoaded = angel.hasLoadedAgent();
-      busy = !!currentChatId && angel.getConvState(currentChatId).streamState === 'streaming';
-
-      // One agent, one conversation: open it as soon as we know which it is.
-      if (agent && currentChatId !== agent.conversationId) {
-        currentChatId = agent.conversationId;
-        angel.loadConversation(currentChatId);
-      }
-    });
-
-    const savedPin = localStorage.getItem('pin');
-    if (savedPin) {
-      angel.connect(savedPin);
-    }
-  });
-
-  onDestroy(() => {
-    unsub?.();
-  });
-
-  function applyDarkMode(dark: boolean) {
-    document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('darkMode', String(dark));
-    const meta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement;
-    if (meta) meta.content = dark ? '#1e1e2e' : '#6366f1';
-  }
-
-  function handleLogin(event: CustomEvent<string>) {
-    localStorage.setItem('pin', event.detail);
-    angel.connect(event.detail);
-  }
-
+  let dark = $state(isDark())
   function toggleDark() {
-    darkMode = !darkMode;
-    applyDarkMode(darkMode);
+    dark = !dark
+    setDarkMode(dark)
   }
 
-  $: needsAuth = connState === 'disconnected' && !localStorage.getItem('pin');
-  $: authFailed = connState === 'disconnected' && !!localStorage.getItem('pin');
+  // Install nudge only after demonstrated engagement: the first reply has landed.
+  let engaged = $state(false)
+  $effect(() => {
+    if (Object.values(angel.convStates).some(c => c.messages.length > 0)) engaged = true
+  })
 </script>
 
-{#if needsAuth || authFailed}
-  <Login on:login={handleLogin} failed={authFailed} />
+{#if !angel.signedIn}
+  <PinLogin auth={angel} />
 {:else}
-  <div class="app" class:menu-open={menuOpen}>
-    <!-- Sidebar -->
-    <aside class="sidebar" class:open={menuOpen}>
-      <div class="sidebar-header">
-        <div class="brand">
-          <h1>{agentName}</h1>
-          {#if connState === 'connected'}
-            <span class="status-dot connected" title="Connected"></span>
-          {:else}
-            <span class="status-dot reconnecting" title="Connecting..."></span>
-          {/if}
-        </div>
-      </div>
-      <div class="channel-list">
-        <button class="channel-item" class:active={view === 'chat'} on:click={() => { view = 'chat'; menuOpen = false; }}>
-          <span class="channel-icon">&amp;</span>
-          <span class="channel-name">{agentName}</span>
-          {#if busy}
-            <span class="busy-dot" title="Responding..."></span>
-          {/if}
-        </button>
-        <button class="channel-item" class:active={view === 'settings'} on:click={() => { view = 'settings'; menuOpen = false; }}>
-          <span class="channel-icon">&#9881;</span>
-          <span class="channel-name">Settings</span>
-        </button>
-      </div>
-      <div class="sidebar-footer">
-        <button class="footer-btn" on:click={toggleDark}>
-          <span class="footer-icon">{#if darkMode}&#9728;{:else}&#9790;{/if}</span>
-          <span>{darkMode ? 'Light mode' : 'Dark mode'}</span>
-        </button>
-        <div class="version-row">
-          <span class="version">v{__BUILD__}</span>
-          <ResetButton />
-        </div>
-      </div>
-    </aside>
+  <div class="shell">
+    <TopBar leading="menu" {title} onleading={() => (menuOpen = true)} />
 
-    <!-- Main -->
-    <main class="main">
-      <header class="app-bar">
-        <button class="menu-btn" on:click={() => menuOpen = !menuOpen}>
-          &#9776;
-        </button>
-        <span class="app-bar-title">{view === 'settings' ? 'Settings' : agentName}</span>
-      </header>
-
+    <div class="body" class:chat={view === 'chat'}>
       {#if view === 'settings'}
         <Settings />
-      {:else if currentChatId}
-        <Chat conversationId={currentChatId} />
-      {:else if agentLoaded && !agent}
-        <div class="empty-state">
-          <p>No agent configured</p>
-        </div>
       {:else}
-        <div class="loading-state">Loading...</div>
+        <Chat />
       {/if}
-    </main>
+    </div>
 
-    {#if menuOpen}
-      <div class="overlay" on:click={() => menuOpen = false} on:keydown={() => {}}></div>
-    {/if}
+    <InstallBanner when={engaged} />
   </div>
+
+  <Drawer open={menuOpen} onclose={() => (menuOpen = false)} {entries}>
+    {#snippet brand()}
+      <div class="brand">
+        <strong>{agentName}</strong>
+        {#if angel.connState === 'connected'}
+          <span class="status-dot connected" title="Connected"></span>
+        {:else}
+          <span class="status-dot reconnecting" title="Connecting..."></span>
+        {/if}
+      </div>
+    {/snippet}
+    {#snippet footer()}
+      <button class="footer-btn" onclick={toggleDark}>
+        <span class="footer-icon">{dark ? '\u2600' : '\u263A'}</span>
+        <span>{dark ? 'Light mode' : 'Dark mode'}</span>
+      </button>
+      <button class="footer-btn" onclick={() => angel.signOut()}>
+        <span class="footer-icon">&#9099;</span>
+        <span>Sign out</span>
+      </button>
+      <p class="build">
+        <span>Version {__BUILD__}</span>
+        <ResetButton tabindex={menuOpen ? 0 : -1} />
+      </p>
+    {/snippet}
+  </Drawer>
 {/if}
 
-<style>
-  .app {
-    display: flex;
-    height: 100%;
-    overflow: hidden;
-  }
+<Toast />
 
-  .sidebar {
-    width: 260px;
-    background: var(--bg-sidebar);
-    border-right: 1px solid var(--border);
+<style>
+  .shell { display: flex; flex-direction: column; height: 100%; }
+  .body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+  /* The chat owns its own layout and scrolls inside itself. */
+  .body.chat {
     display: flex;
     flex-direction: column;
-    flex-shrink: 0;
-    transition: transform 0.2s ease;
-  }
-
-  .sidebar-header {
-    padding: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .sidebar-header h1 {
-    font-size: 1.2rem;
-    font-weight: 600;
-    margin: 0;
-    color: var(--text-primary);
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .channel-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px;
-  }
-
-  .channel-item {
-    width: 100%;
-    padding: 8px 12px;
-    background: none;
-    border: none;
-    border-left: 2px solid transparent;
-    border-radius: 0 8px 8px 0;
-    cursor: pointer;
-    text-align: left;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-primary);
-    font-size: 0.9rem;
-    margin-bottom: 1px;
-  }
-  .channel-item:hover { background: var(--bg-hover); }
-  .channel-item.active {
-    background: var(--bg-active);
-    border-left-color: var(--accent);
-  }
-
-  .channel-icon {
-    font-weight: 700;
-    font-size: 1rem;
-    color: var(--text-secondary);
-    width: 1.2em;
-    text-align: center;
-    flex-shrink: 0;
-  }
-  .channel-name {
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overscroll-behavior-y: none;
+  }
+  @media (min-width: 768px) {
+    .shell { margin-inline-start: min(78vw, 300px); }
   }
 
-  .sidebar-footer {
-    border-top: 1px solid var(--border);
-    padding: 8px;
-  }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .status-dot.connected { background: var(--ok); }
+  .status-dot.reconnecting { background: #f59e0b; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
   .footer-btn {
     width: 100%;
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
-    background: none;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    color: var(--text-primary);
+    padding: 10px 0;
     font-size: 0.85rem;
+    color: var(--text-primary);
     text-align: left;
   }
-  .footer-btn:hover { background: var(--bg-hover); }
+  .footer-btn:hover { color: var(--accent); }
   .footer-icon { width: 1.2em; text-align: center; }
 
-  .version-row {
+  .build {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 6px 12px 2px;
+    gap: 6px;
+    font-size: 0.65rem;
     color: var(--text-secondary);
-    font-size: 0.75rem;
+    margin-top: 8px;
   }
-
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-  .busy-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--accent);
-    margin-left: auto;
-    flex-shrink: 0;
-    animation: pulse 1.5s infinite;
-  }
-  .status-dot.connected { background: #22c55e; }
-  .status-dot.reconnecting { background: #f59e0b; animation: pulse 1.5s infinite; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-
-  .main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .app-bar {
-    height: 52px;
-    display: flex;
-    align-items: center;
-    padding: 0 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-surface);
-    flex-shrink: 0;
-  }
-
-  .menu-btn {
-    display: none;
-    background: none;
-    border: none;
-    font-size: 1.3rem;
-    cursor: pointer;
-    color: var(--text-primary);
-    padding: 4px 8px;
-    margin-right: 8px;
-  }
-
-  .app-bar-title {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .loading-state {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-secondary);
-    font-size: 0.9rem;
-  }
-
-  .empty-state {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    color: var(--text-secondary);
-  }
-
-  .overlay { display: none; }
-
-  @media (max-width: 768px) {
-    .sidebar {
-      position: fixed;
-      left: 0; top: 0; bottom: 0;
-      z-index: 100;
-      transform: translateX(-100%);
-    }
-    .sidebar.open { transform: translateX(0); }
-    .menu-btn { display: block; }
-    .overlay {
-      display: block;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.4);
-      z-index: 99;
-    }
-  }
+  .build span { opacity: 0.6; }
 </style>

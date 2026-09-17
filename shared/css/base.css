@@ -1,0 +1,100 @@
+/* pwa-kit: shell/css/base.css v6 */
+/* App-wide tokens, reset and shell rules. Import first from main.ts.
+   Seams: the token VALUES in :root (and .dark, if the app has dark mode) -
+   everything in shared/ui references only these names, so re-skinning an
+   app is redefining the accent triple and the neutrals. See
+   reference/visual.md for the palettes the family uses. */
+
+:root {
+  /* identity */
+  --accent: #6366f1;
+  --accent-deep: #4f46e5;
+  --accent-light: #a5b4fc;
+  --accent-soft: #eef2ff;      /* tinted surface for selected/current rows */
+
+  /* neutrals */
+  --bg-surface: #ffffff;       /* page */
+  --bg-raised: #ffffff;        /* cards, inputs */
+  --bg-sidebar: #f8f9fa;       /* chat sidebar */
+  --bg-hover: #f1f3f5;         /* hover, selected, disabled fill */
+  --bg-active: #e9ecef;        /* current row in the sidebar */
+  --bg-message: #f1f3f5;       /* assistant bubble */
+  --bg-code: #f1f3f5;          /* inline code, attachment previews */
+  --bg-input: #ffffff;
+  --text-primary: #1a1a1a;
+  --text-secondary: #6b7280;
+  --border: #e5e7eb;
+
+  /* semantic */
+  --ok: #22c55e;
+  --danger: #ef4444;
+  --danger-deep: #b91c1c;
+
+  --radius: 10px;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Catppuccin Mocha. The accent stays constant across both modes. */
+.dark {
+  --bg-surface: #1e1e2e;
+  --bg-raised: #313244;
+  --bg-sidebar: #181825;
+  --bg-hover: #313244;
+  --bg-active: #45475a;
+  --bg-message: #313244;
+  --bg-code: #181825;
+  --bg-input: #313244;
+  --border: #45475a;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --ok: #a6e3a1;
+  --danger: #f38ba8;
+  --danger-deep: #e64553;
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* The shell never scrolls; each view has exactly one inner scroller. This is
+   also what makes the mobile keyboard resize the layout instead of pushing
+   it, together with the viewport meta in index.html. */
+html, body, #app { height: 100dvh; }
+html { background: var(--bg-surface); }
+body {
+  font-family: var(--font-body);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+a { color: var(--accent); }
+h1, h2, h3 { font-weight: 500; line-height: 1.25; }
+img { max-width: 100%; }
+
+/* Desktop: a touch more type, and the drawer becomes a permanent sidebar
+   (see ui/Drawer.svelte and the .shell margin in App.svelte). */
+@media (min-width: 768px) {
+  html { font-size: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

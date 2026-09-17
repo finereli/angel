@@ -1,8 +1,8 @@
-// Adapted from the pwa skill's updates kit item (Svelte 5 runes -> Svelte 4
-// stores; see reference/updates.md for the full spec this implements).
+// pwa-kit: updates/lib/updates.svelte.ts v4
+// Version-update flow for an installable PWA (spec: reference/updates.md).
 //
 // The service worker takes over as soon as it has downloaded (skipWaiting +
-// clientsClaim, see vite.config.ts), so the newest version always serves the
+// clientsClaim, see build/pwa-build.ts), so the newest version always serves the
 // next page load and a plain reload can never be stuck on an old one. What
 // this module decides is *when the page reloads into it*:
 //
@@ -12,34 +12,33 @@
 //     reloads on the spot. Otherwise `available` turns on, the drawer's
 //     reload icon lights up (a tap reloads now), and sending the app to the
 //     background applies the update silently.
+//     Wire it in main.ts: `updates.init({ canReload: () => !player.playing })`.
+//   - the host can veto the silent moments via `canReload` (audio playing,
+//     upload in flight); the update just waits for the next one.
 //   - the app checks for a new version on launch, on every return to the
 //     foreground, and hourly while it stays open.
 //   - `reset()` is the manual escape hatch: unregister the worker, wipe the
 //     caches, reload from the network. `/reset.html` does the same without
-//     any of the app's code (it is served past the worker), for a page stuck
-//     on a build older than this one.
+//     any of the app's code (it is served past the worker), for phones that
+//     are stuck on a build older than this one.
 //
 // Registration is done here directly rather than through vite-plugin-pwa's
 // `virtual:pwa-register`: its reload-on-update logic only fires for pages
 // that were already controlled when they loaded, so after a hard refresh (or
-// on a first visit) the update button would silently do nothing.
-
-import { writable } from 'svelte/store'
+// on a first visit) the update button silently did nothing.
 
 const SW_URL = '/sw.js'
 const CHECK_EVERY = 60 * 60 * 1000
 // A reload this soon after launch, before the first tap, is invisible.
 const QUIET_LAUNCH_MS = 10_000
 
-export const updateAvailable = writable(false)
-export const resetting = writable(false)
-
 class Updates {
+  available = $state(false)
+  resetting = $state(false)
   #reg: ServiceWorkerRegistration | null = null
   #canReload: () => boolean = () => true
   #interacted = false
   #reloading = false
-  #available = false
 
   init({ canReload = () => true }: { canReload?: () => boolean } = {}) {
     if (!('serviceWorker' in navigator)) return
@@ -63,14 +62,13 @@ class Updates {
         return
       }
       current = controller
-      this.#available = true
-      updateAvailable.set(true)
+      this.available = true
       this.#applyIfUnobtrusive()
     })
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') this.check()
-      else if (this.#available && this.#canReload()) this.apply()
+      else if (this.available && this.#canReload()) this.apply()
     })
     setInterval(() => document.visibilityState === 'visible' && this.check(), CHECK_EVERY)
 
@@ -106,7 +104,7 @@ class Updates {
   async reset() {
     if (this.#reloading) return
     this.#reloading = true
-    resetting.set(true)
+    this.resetting = true
     try {
       const regs = await navigator.serviceWorker.getRegistrations()
       await Promise.all(regs.map((r) => r.unregister()))
