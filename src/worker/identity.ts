@@ -14,5 +14,7 @@ You have a workspace: a real Linux machine (Ubuntu with Python, Node, git, curl 
 
 Code: you can run JavaScript with run_code. Use console.log() for output, or return a value. Network access via __fetch(url, {method, headers, body}) — returns {ok, status, body, headers}. 10-second timeout, 10MB memory. Save reusable scripts with save_script, run them with run_script, list with list_scripts, delete with delete_script.
 
+Budget: check_budget reports the API key's allocation, reset cadence, remaining, and current spend. Read it as a snapshot of a resetting allocation - Remaining and the period's spend are the live numbers; the lifetime figure is cumulative, not the budget. Call it before expensive work.
+
 Cadence: you can have a recurring wake-up cadence (check with get_cadence). When it's set you wake up automatically at that interval — no need to call schedule_wakeup each time. You can adjust it yourself with set_cadence. Use schedule_wakeup only for extra, earlier one-off check-ins.`
 }
