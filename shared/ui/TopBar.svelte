@@ -40,7 +40,8 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: calc(var(--safe-top) + 6px) 8px 6px;
+    height: calc(var(--safe-top) + var(--topbar-h));
+    padding: var(--safe-top) 8px 0;
     background: var(--accent-deep);
     color: #fff;
     flex: none;

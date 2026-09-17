@@ -78,7 +78,7 @@
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.18);
     display: flex;
     flex-direction: column;
-    padding: calc(var(--safe-top) + 22px) 0 calc(var(--safe-bottom) + 22px);
+    padding: 0 0 calc(var(--safe-bottom) + 22px);
     /* Hidden off the start edge. transform isn't direction-aware, so branch
        on the document direction. */
     transform: translateX(-100%);
@@ -97,7 +97,10 @@
   }
 
   .brand {
-    padding: 0 22px 20px;
+    height: calc(var(--safe-top) + var(--topbar-h));
+    display: flex;
+    align-items: center;
+    padding: var(--safe-top) 22px 0;
     border-bottom: 1px solid var(--border);
   }
 
