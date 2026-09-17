@@ -20,7 +20,7 @@ const headers = (env: Env) => ({
 export async function chatCompletion(
   env: Env,
   messages: ChatMessage[],
-  opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string } = {}
+  opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string; reasoningEffort?: string | null } = {}
 ): Promise<{ content: string | null; tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>; usage?: { prompt_tokens: number; completion_tokens: number } }> {
   const model = opts.model || getModel(env)
   const body: Record<string, unknown> = {
@@ -30,6 +30,7 @@ export async function chatCompletion(
   }
   if (opts.max_tokens) body.max_tokens = opts.max_tokens
   if (opts.tools?.length) { body.tools = opts.tools; body.tool_choice = 'auto' }
+  if (opts.reasoningEffort) body.reasoning = { effort: opts.reasoningEffort }
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), NONSTREAM_MS)
@@ -52,7 +53,7 @@ export async function chatCompletion(
 export async function* chatCompletionStream(
   env: Env,
   messages: ChatMessage[],
-  opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string } = {}
+  opts: { tools?: ToolDefinition[]; temperature?: number; max_tokens?: number; model?: string; reasoningEffort?: string | null } = {}
 ): AsyncGenerator<StreamChunk> {
   const model = opts.model || getModel(env)
   const body: Record<string, unknown> = {
@@ -64,6 +65,7 @@ export async function* chatCompletionStream(
   }
   if (opts.max_tokens) body.max_tokens = opts.max_tokens
   if (opts.tools?.length) { body.tools = opts.tools; body.tool_choice = 'auto' }
+  if (opts.reasoningEffort) body.reasoning = { effort: opts.reasoningEffort }
 
   const controller = new AbortController()
   let stallTimer: ReturnType<typeof setTimeout> | undefined

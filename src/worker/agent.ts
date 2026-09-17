@@ -22,6 +22,7 @@ interface AgentContext {
   agentId: string
   agentName: string
   agentModel?: string | null
+  agentReasoningEffort?: string | null
   broadcast?: (msg: ServerMsg) => void
 }
 
@@ -110,7 +111,7 @@ function verbatimTurns(pairs: Pair[]): ChatMessage[] {
 
 // ---- Response pass (hot path, streaming) ----
 export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGenerator<AgentEvent> {
-  const { env, conversationId, agentId, agentName, agentModel } = ctx
+  const { env, conversationId, agentId, agentName, agentModel, agentReasoningEffort } = ctx
   const modelId = getModel(env, agentModel)
 
   let system = await buildSystemPrompt(env, agentId, agentName)
@@ -156,7 +157,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         await sleep(Math.min(600 * 2 ** (attempt - 1), 5000)) // 0.6s, 1.2s, 2.4s, 4.8s, 5s
       }
       try {
-        for await (const chunk of chatCompletionStream(env, messages, { tools, model: modelId })) {
+        for await (const chunk of chatCompletionStream(env, messages, { tools, model: modelId, reasoningEffort: agentReasoningEffort })) {
           const choice = chunk.choices[0]
           if (!choice) continue
           if (choice.finish_reason) finishReason = choice.finish_reason

@@ -67,6 +67,7 @@ class AngelClient {
   private pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
   private agentLoaded = false
   private loadedConversations = new Set<string>()
+  private settingsError: string | null = null
 
   constructor() {
     // Visibility-change reconnect: bypass throttled timers on mobile.
@@ -89,6 +90,12 @@ class AngelClient {
   getConnState(): ConnState { return this.connState }
   getAgent(): AgentInfo | null { return this.agent }
   hasLoadedAgent(): boolean { return this.agentLoaded }
+  getSettingsError(): string | null { return this.settingsError }
+
+  updateSettings(model: string | null, reasoningEffort: string | null) {
+    this.settingsError = null
+    this.send({ type: 'settings:set', model, reasoningEffort })
+  }
 
   getConvState(id: string): ConversationState {
     if (!this.convStates.has(id)) {
@@ -368,6 +375,19 @@ class AngelClient {
         state.streamParts = []
         state.streamSeq = 0
         state.streamStartTime = 0
+        this.notify()
+        break
+      }
+
+      case 'agent:updated': {
+        this.agent = msg.agent
+        this.settingsError = null
+        this.notify()
+        break
+      }
+
+      case 'settings:error': {
+        this.settingsError = msg.message
         this.notify()
         break
       }

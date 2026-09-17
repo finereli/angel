@@ -170,6 +170,8 @@ export interface AgentInfo {
   id: string
   name: string
   conversationId: string
+  model: string | null
+  reasoningEffort: string | null
 }
 
 export type ClientMsg =
@@ -179,6 +181,7 @@ export type ClientMsg =
   | { type: 'chat'; conversationId: string; clientMsgId: string; content: string }
   | { type: 'doc:add'; conversationId: string; clientDocId: string; title: string; content: string }
   | { type: 'stop'; conversationId: string }
+  | { type: 'settings:set'; model: string | null; reasoningEffort: string | null }
 
 export type ServerMsg =
   | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agent: AgentInfo | null; pendingTurns: string[] }
@@ -194,6 +197,8 @@ export type ServerMsg =
   | { type: 'stream:reset'; conversationId: string; seq: number; parts: StreamPart[] }
   | { type: 'doc:added'; conversationId: string; clientDocId: string; id: string; title: string; lineCount: number }
   | { type: 'doc:error'; conversationId: string; clientDocId: string; message: string }
+  | { type: 'agent:updated'; agent: AgentInfo }
+  | { type: 'settings:error'; message: string }
 
 // Agent event types (internal, yielded by the agent loop)
 export type AgentEvent =

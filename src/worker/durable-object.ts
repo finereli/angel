@@ -6,6 +6,7 @@ import { runAgent, runMemoryPass } from './agent'
 import { storeDocument, normalizeContent } from './documents'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
+import { isKnownModel, isReasoningEffort } from './models'
 
 interface ActiveStream {
   conversationId: string
@@ -159,6 +160,10 @@ export class AngelDO implements DurableObject {
       case 'stop':
         this.handleStop(msg.conversationId)
         break
+
+      case 'settings:set':
+        await this.handleSettingsSet(ws, msg.model, msg.reasoningEffort)
+        break
     }
   }
 
@@ -176,18 +181,36 @@ export class AngelDO implements DurableObject {
   // both tables generic; the UI just never asks for more than the first row.
   private async loadAgent(): Promise<AgentInfo | null> {
     const row = await this.env.DB.prepare(
-      `SELECT a.id, a.name, c.id as conversation_id
+      `SELECT a.id, a.name, a.model, a.reasoning_effort, c.id as conversation_id
        FROM agents a JOIN conversations c ON c.agent_id = a.id
        ORDER BY a.created_at, c.created_at LIMIT 1`
-    ).first<{ id: string; name: string; conversation_id: string }>()
-    return row ? { id: row.id, name: row.name, conversationId: row.conversation_id } : null
+    ).first<{ id: string; name: string; model: string | null; reasoning_effort: string | null; conversation_id: string }>()
+    return row
+      ? { id: row.id, name: row.name, conversationId: row.conversation_id, model: row.model, reasoningEffort: row.reasoning_effort }
+      : null
   }
 
-  private async resolveAgent(conversationId: string): Promise<{ agentId: string; agentName: string; agentModel: string | null } | null> {
+  private async handleSettingsSet(ws: WebSocket, model: string | null, reasoningEffort: string | null) {
+    if (model !== null && !isKnownModel(model)) {
+      this.send(ws, { type: 'settings:error', message: `Unknown model: ${model}` })
+      return
+    }
+    if (reasoningEffort !== null && !isReasoningEffort(reasoningEffort)) {
+      this.send(ws, { type: 'settings:error', message: `Unknown reasoning effort: ${reasoningEffort}` })
+      return
+    }
+    const agent = await this.loadAgent()
+    if (!agent) return
+    await this.env.DB.prepare(`UPDATE agents SET model = ?, reasoning_effort = ? WHERE id = ?`)
+      .bind(model, reasoningEffort, agent.id).run()
+    this.broadcast({ type: 'agent:updated', agent: { ...agent, model, reasoningEffort } })
+  }
+
+  private async resolveAgent(conversationId: string): Promise<{ agentId: string; agentName: string; agentModel: string | null; agentReasoningEffort: string | null } | null> {
     const row = await this.env.DB.prepare(
-      `SELECT a.id, a.name, a.model FROM conversations c JOIN agents a ON a.id = c.agent_id WHERE c.id = ?`
-    ).bind(conversationId).first<{ id: string; name: string; model: string | null }>()
-    return row ? { agentId: row.id, agentName: row.name, agentModel: row.model } : null
+      `SELECT a.id, a.name, a.model, a.reasoning_effort FROM conversations c JOIN agents a ON a.id = c.agent_id WHERE c.id = ?`
+    ).bind(conversationId).first<{ id: string; name: string; model: string | null; reasoning_effort: string | null }>()
+    return row ? { agentId: row.id, agentName: row.name, agentModel: row.model, agentReasoningEffort: row.reasoning_effort } : null
   }
 
   // How much history a conversation load ships to the client. The stream is the
@@ -248,7 +271,7 @@ export class AngelDO implements DurableObject {
       return
     }
 
-    await this.runTurn(conversationId, agent.agentId, agent.agentName, agent.agentModel, content)
+    await this.runTurn(conversationId, agent.agentId, agent.agentName, agent.agentModel, agent.agentReasoningEffort, content)
   }
 
   private async touchConversation(conversationId: string): Promise<void> {
@@ -283,9 +306,9 @@ export class AngelDO implements DurableObject {
 
   // Run a full turn for a saved user-side message: the streamed response on the
   // response chain, then the memory work on its own serialized chain.
-  private async runTurn(conversationId: string, agentId: string, agentName: string, agentModel: string | null, content: string): Promise<void> {
+  private async runTurn(conversationId: string, agentId: string, agentName: string, agentModel: string | null, agentReasoningEffort: string | null, content: string): Promise<void> {
     this.markPending(conversationId)
-    const respLink = this.responseChain.then(() => this.streamResponse(conversationId, agentId, agentName, agentModel, content))
+    const respLink = this.responseChain.then(() => this.streamResponse(conversationId, agentId, agentName, agentModel, agentReasoningEffort, content))
     this.responseChain = respLink.then(() => {}, () => {})
     try { await respLink }
     catch (e) { console.error('[runTurn] response failed:', e instanceof Error ? e.message : e) }
@@ -300,7 +323,7 @@ export class AngelDO implements DurableObject {
     await this.syncAlarm().catch(e => console.error('[runTurn] syncAlarm failed:', e instanceof Error ? e.message : e))
   }
 
-  private async streamResponse(conversationId: string, agentId: string, agentName: string, agentModel: string | null, content: string): Promise<string> {
+  private async streamResponse(conversationId: string, agentId: string, agentName: string, agentModel: string | null, agentReasoningEffort: string | null, content: string): Promise<string> {
     this.unmarkPending(conversationId) // no longer queued: it's live from here
     const stream: ActiveStream = {
       conversationId, seq: 0, text: '', commitLen: 0, commitPartLen: 0, savedLen: 0, tools: [], parts: [], aborted: false, savedMsgId: null,
@@ -312,7 +335,7 @@ export class AngelDO implements DurableObject {
 
     try {
       const agentCtx = {
-        env: this.env, conversationId, agentId, agentName, agentModel,
+        env: this.env, conversationId, agentId, agentName, agentModel, agentReasoningEffort,
         broadcast: (msg: ServerMsg) => this.broadcast(msg),
       }
       for await (const event of runAgent(agentCtx, content)) {
@@ -502,13 +525,13 @@ export class AngelDO implements DurableObject {
     for (const { conversationId, agentId } of interrupted) {
       try {
         const agent = await this.env.DB.prepare(
-          `SELECT name, model FROM agents WHERE id = ?`
-        ).bind(agentId).first<{ name: string; model: string | null }>()
+          `SELECT name, model, reasoning_effort FROM agents WHERE id = ?`
+        ).bind(agentId).first<{ name: string; model: string | null; reasoning_effort: string | null }>()
         if (!agent) continue
 
         const sysContent = '<system>You were interrupted mid-response by a restart. Review the conversation and continue where you left off.</system>'
         await this.saveUserMessage(conversationId, sysContent, `restart-${agentId}-${Date.now()}`)
-        await this.runTurn(conversationId, agentId, agent.name, agent.model, sysContent)
+        await this.runTurn(conversationId, agentId, agent.name, agent.model, agent.reasoning_effort, sysContent)
       } catch (e) {
         console.error('[resumeInterrupted] failed for', agentId, e instanceof Error ? e.message : e)
       }
@@ -551,13 +574,13 @@ export class AngelDO implements DurableObject {
   async alarm(): Promise<void> {
     const now = new Date().toISOString()
     const due = await this.env.DB.prepare(
-      `SELECT w.agent_id, w.reason, a.name as agent_name, a.model as agent_model, a.cadence_minutes, c.id as conversation_id
+      `SELECT w.agent_id, w.reason, a.name as agent_name, a.model as agent_model, a.reasoning_effort as agent_reasoning_effort, a.cadence_minutes, c.id as conversation_id
        FROM agent_wakeups w
        JOIN agents a ON a.id = w.agent_id
        JOIN conversations c ON c.agent_id = w.agent_id
        WHERE w.wake_at <= ?
        ORDER BY w.wake_at ASC`
-    ).bind(now).all<{ agent_id: string; reason: string | null; agent_name: string; agent_model: string | null; cadence_minutes: number | null; conversation_id: string }>()
+    ).bind(now).all<{ agent_id: string; reason: string | null; agent_name: string; agent_model: string | null; agent_reasoning_effort: string | null; cadence_minutes: number | null; conversation_id: string }>()
 
     for (const row of due.results) {
       await this.env.DB.prepare(
@@ -578,7 +601,7 @@ export class AngelDO implements DurableObject {
       const sysContent = `<system>Wake up — ${reason}</system>`
       try {
         await this.saveUserMessage(row.conversation_id, sysContent, `wakeup-${row.agent_id}-${Date.now()}`)
-        await this.runTurn(row.conversation_id, row.agent_id, row.agent_name, row.agent_model, sysContent)
+        await this.runTurn(row.conversation_id, row.agent_id, row.agent_name, row.agent_model, row.agent_reasoning_effort, sysContent)
       } catch (e) {
         console.error('[alarm] wake-up failed for', row.agent_id, e instanceof Error ? e.message : e)
       }

@@ -3,6 +3,7 @@
   import { angel } from './streamManager';
   import Login from './pages/Login.svelte';
   import Chat from './pages/Chat.svelte';
+  import Settings from './pages/Settings.svelte';
   import ResetButton from './ResetButton.svelte';
 
   let connState = angel.getConnState();
@@ -11,6 +12,7 @@
   let menuOpen = false;
   let darkMode = false;
   let agentLoaded = angel.hasLoadedAgent();
+  let view: 'chat' | 'settings' = 'chat';
 
   let unsub: (() => void) | null = null;
   let busy = false;
@@ -83,12 +85,16 @@
         </div>
       </div>
       <div class="channel-list">
-        <button class="channel-item active" on:click={() => (menuOpen = false)}>
+        <button class="channel-item" class:active={view === 'chat'} on:click={() => { view = 'chat'; menuOpen = false; }}>
           <span class="channel-icon">&amp;</span>
           <span class="channel-name">{agentName}</span>
           {#if busy}
             <span class="busy-dot" title="Responding..."></span>
           {/if}
+        </button>
+        <button class="channel-item" class:active={view === 'settings'} on:click={() => { view = 'settings'; menuOpen = false; }}>
+          <span class="channel-icon">&#9881;</span>
+          <span class="channel-name">Settings</span>
         </button>
       </div>
       <div class="sidebar-footer">
@@ -109,10 +115,12 @@
         <button class="menu-btn" on:click={() => menuOpen = !menuOpen}>
           &#9776;
         </button>
-        <span class="app-bar-title">{agentName}</span>
+        <span class="app-bar-title">{view === 'settings' ? 'Settings' : agentName}</span>
       </header>
 
-      {#if currentChatId}
+      {#if view === 'settings'}
+        <Settings />
+      {:else if currentChatId}
         <Chat conversationId={currentChatId} />
       {:else if agentLoaded && !agent}
         <div class="empty-state">
