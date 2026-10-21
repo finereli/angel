@@ -1,4 +1,5 @@
 <script lang="ts">
+  import InstallBanner from '$shared/ui/InstallBanner.svelte'
   import { onMount, onDestroy, tick } from 'svelte';
   import { angel } from '../lib/streamManager.svelte';
   import { renderMarkdown, dayKey, dateLabel, timeLabel } from '../util';
@@ -438,6 +439,9 @@
           </div>
         </div>
       {/if}
+      <!-- Install nudge: after demonstrated engagement (there is a conversation),
+           at the end of the history so it never covers the input. -->
+      <InstallBanner when={conv.messages.length > 0} inline />
     {/if}
   </div>
 

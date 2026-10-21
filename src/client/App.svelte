@@ -6,7 +6,6 @@
   import Drawer from '$shared/ui/Drawer.svelte'
   import Toast from '$shared/ui/Toast.svelte'
   import ResetButton from '$shared/ui/ResetButton.svelte'
-  import InstallBanner from '$shared/ui/InstallBanner.svelte'
   import Icon from '$shared/ui/Icon.svelte'
   import LoginScreen from '$shared/ui/LoginScreen.svelte'
   import Chat from './pages/Chat.svelte'
@@ -54,11 +53,6 @@
     setDarkMode(dark)
   }
 
-  // Install nudge only after demonstrated engagement: the first reply has landed.
-  let engaged = $state(false)
-  $effect(() => {
-    if (Object.values(angel.convStates).some(c => c.messages.length > 0)) engaged = true
-  })
 </script>
 
 {#if !angel.signedIn || angel.denied !== null}
@@ -84,7 +78,6 @@
       {/if}
     </div>
 
-    <InstallBanner when={engaged} />
   </div>
 
   <Drawer open={menuOpen} onclose={() => (menuOpen = false)} {entries}>

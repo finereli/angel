@@ -10,7 +10,8 @@
   //
   // Needs the inline capture in index.html (window.__pwaInstallPrompt) and
   // the icons kit (install_mobile, close, ios_share, more_vert).
-  // Seams: the strings, `bottom` offset above the app's own bottom bar,
+  // Seams: the strings, `bottom` offset above the app's own bottom bar (or `inline`
+  // to live at the end of a scrolling list, clear of the inputs),
   // colours (accent-deep surface, a highlight for the icon and edge).
   import Icon from './Icon.svelte'
 
@@ -23,9 +24,12 @@
     androidSteps = 'Tap',
     androidThen = 'then "Install app"',
     bottom = '48px',
+    inline = false,
   }: {
     when?: boolean; text?: string; closeLabel?: string; iosSteps?: string; iosThen?: string
     androidSteps?: string; androidThen?: string; bottom?: string
+    // Sit in the flow (at the end of a scrolling list) instead of floating over the bottom edge.
+    inline?: boolean
   } = $props()
 
   let visible = $state(false)
@@ -82,7 +86,7 @@
 </script>
 
 {#if visible}
-  <div class="banner" class:expanded role="alert" style:bottom>
+  <div class="banner" class:expanded class:inline role="alert" style:bottom={inline ? undefined : bottom}>
     <button class="tip" onclick={tap}>
       <span class="lead"><Icon name="install_mobile" size={20} /></span>
       <span class="text">{text}</span>
@@ -123,6 +127,12 @@
     box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
     flex-wrap: wrap;
     animation: chyron-in 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .banner.inline {
+    position: relative;
+    inset-inline-start: auto;
+    align-self: flex-start;
+    flex-shrink: 0;
   }
   .tip {
     display: flex;
