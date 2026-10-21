@@ -1,5 +1,6 @@
 <script lang="ts">
   import { angel } from '../lib/streamManager.svelte'
+  import ResetButton from '$shared/ui/ResetButton.svelte'
   import { MODEL_CATALOG, REASONING_EFFORTS, modelSupportsReasoning, resolveModel } from '../../worker/models'
 
   const selectedModel = $derived(resolveModel(angel.agent?.model))
@@ -69,6 +70,14 @@
   </section>
 
   <section>
+    <h3>Account</h3>
+    <p class="hint">
+      {#if angel.user}Signed in as {angel.user.name ? `${angel.user.name} (${angel.user.email})` : angel.user.email}.{:else}Local development session.{/if}
+    </p>
+    <button class="quiet-btn neutral" onclick={() => angel.signOut()}>Sign out</button>
+  </section>
+
+  <section>
     <h3>Your data</h3>
     <p class="hint">Everything {angel.agent?.name || 'Angel'} remembers about you - the conversation, memory, lists, documents and wake-ups - is stored under your account. Deleting it can't be undone.</p>
     {#if !confirmingReset}
@@ -80,6 +89,14 @@
         <button class="quiet-btn" disabled={resetting} onclick={() => (confirmingReset = false)}>Cancel</button>
       </div>
     {/if}
+  </section>
+
+  <section>
+    <h3>About</h3>
+    <p class="about">
+      <span>Version {__BUILD__}</span>
+      <ResetButton />
+    </p>
   </section>
 </div>
 
@@ -150,6 +167,8 @@
   .danger-btn:disabled, .quiet-btn:disabled { opacity: 0.6; }
   .quiet-btn { border-color: var(--text-secondary); color: var(--text-secondary); }
   .quiet-btn:hover { background: var(--bg-hover); }
+  .quiet-btn.neutral { border-color: var(--border); color: var(--text-primary); }
+  .about { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-secondary); }
   .effort-row {
     display: flex;
     flex-wrap: wrap;

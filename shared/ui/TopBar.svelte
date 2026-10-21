@@ -8,8 +8,13 @@
   // `trailing` is an optional action on the far side (a snippet rendering
   // the icon, with `trailingLabel` + `ontrailing`), used sparingly - most
   // screens have none. Seams: the aria labels.
-  let { leading = 'menu', title = '', onleading, menuLabel = 'Menu', backLabel = 'Back', trailing, trailingLabel = '', ontrailing }: {
-    leading?: 'menu' | 'back'; title?: string; onleading?: () => void; menuLabel?: string; backLabel?: string
+  //
+  // Local changes from the kit: the bar is quiet (page surface, hairline, not
+  // the accent block), the title sits next to the menu button, `titleAfter`
+  // renders beside it (a status dot), and on desktop the bar is gone - the
+  // permanent sidebar already says where you are.
+  let { leading = 'menu', title = '', titleAfter, onleading, menuLabel = 'Menu', backLabel = 'Back', trailing, trailingLabel = '', ontrailing }: {
+    leading?: 'menu' | 'back'; title?: string; titleAfter?: Snippet; onleading?: () => void; menuLabel?: string; backLabel?: string
     trailing?: Snippet; trailingLabel?: string; ontrailing?: () => void
   } = $props()
 </script>
@@ -24,14 +29,13 @@
   </button>
 
   <h1>{title}</h1>
+  {#if titleAfter}<span class="after">{@render titleAfter()}</span>{/if}
+  <span class="grow"></span>
 
   {#if trailing}
     <button class="lead" onclick={ontrailing} aria-label={trailingLabel} title={trailingLabel}>
       {@render trailing()}
     </button>
-  {:else}
-    <!-- Balances the leading button so the title sits truly centred. -->
-    <span class="trail"></span>
   {/if}
 </header>
 
@@ -42,14 +46,17 @@
     gap: 4px;
     height: calc(var(--safe-top) + var(--topbar-h));
     padding: var(--safe-top) 8px 0;
-    background: var(--accent-deep);
-    color: #fff;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border);
     flex: none;
     z-index: 20;
   }
+  @media (min-width: 768px) {
+    .topbar { display: none; }
+  }
 
-  .lead,
-  .trail {
+  .lead {
     width: 44px;
     height: 44px;
     flex: none;
@@ -59,25 +66,23 @@
 
   .lead {
     border-radius: 50%;
-    opacity: 0.9;
-    transition: background 0.15s, opacity 0.15s;
+    color: var(--text-secondary);
+    transition: background 0.15s, color 0.15s;
   }
-  .lead:hover { background: rgba(255, 255, 255, 0.12); opacity: 1; }
-  @media (min-width: 768px) {
-    .lead.menu-btn { visibility: hidden; }
-  }
+  .lead:hover { background: var(--bg-hover); color: var(--text-primary); }
   /* The chevron points at the edge the user came from. The raw path is a ">",
      which is right for RTL; LTR flips it. */
   :global([dir='ltr']) .chevron { transform: scaleX(-1); }
 
   h1 {
-    flex: 1;
-    text-align: center;
-    font-size: 1.1rem;
-    font-weight: 500;
-    color: #fff;
+    min-width: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .after { display: inline-flex; align-items: center; margin-inline-start: 2px; }
+  .grow { flex: 1; }
 </style>

@@ -13,9 +13,11 @@
   // ResetButton). Seams: closeLabel, width.
   export interface DrawerEntry { label: string; hash: string; current?: boolean; count?: number }
   export interface DrawerGroup { title?: string; entries: DrawerEntry[] }
-  let { open = false, onclose, entries = [], groups, brand, footer, closeLabel = 'Close menu' }: {
+  // Local change from the kit: `list` replaces the generated entries, for a list
+  // that needs its own rows (labels with actions, per-row menus).
+  let { open = false, onclose, entries = [], groups, brand, list, footer, closeLabel = 'Close menu' }: {
     open?: boolean; onclose?: () => void; entries?: DrawerEntry[]; groups?: DrawerGroup[]
-    brand?: Snippet; footer?: Snippet; closeLabel?: string
+    brand?: Snippet; list?: Snippet; footer?: Snippet; closeLabel?: string
   } = $props()
   const sections = $derived(groups ?? [{ entries }])
 
@@ -34,20 +36,24 @@
     <div class="brand">{@render brand()}</div>
   {/if}
 
-  <ul>
-    {#each sections as g, i}
-      {#if i > 0}<li class="separator"></li>{/if}
-      {#if g.title}<li class="section-label">{g.title}</li>{/if}
-      {#each g.entries as e}
-        <li>
-          <button class:current={e.current} onclick={() => go(e.hash)} tabindex={open ? 0 : -1}>
-            {e.label}
-            {#if e.count}<span class="count">{e.count}</span>{/if}
-          </button>
-        </li>
+  {#if list}
+    <div class="list">{@render list()}</div>
+  {:else}
+    <ul>
+      {#each sections as g, i}
+        {#if i > 0}<li class="separator"></li>{/if}
+        {#if g.title}<li class="section-label">{g.title}</li>{/if}
+        {#each g.entries as e}
+          <li>
+            <button class:current={e.current} onclick={() => go(e.hash)} tabindex={open ? 0 : -1}>
+              {e.label}
+              {#if e.count}<span class="count">{e.count}</span>{/if}
+            </button>
+          </li>
+        {/each}
       {/each}
-    {/each}
-  </ul>
+    </ul>
+  {/if}
 
   {#if footer}
     <div class="footer">{@render footer()}</div>
@@ -100,8 +106,16 @@
     height: calc(var(--safe-top) + var(--topbar-h));
     display: flex;
     align-items: center;
-    padding: var(--safe-top) 22px 0;
+    padding: var(--safe-top) var(--gutter) 0;
     border-bottom: 1px solid var(--border);
+  }
+  .drawer { --gutter: 22px; }
+  .list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 0;
   }
 
   /* The nav list is the scroll region: a drawer taller than the screen
@@ -157,7 +171,7 @@
 
   .footer {
     margin-top: auto;
-    padding: 16px 22px;
+    padding: 12px var(--gutter);
     border-top: 1px solid var(--border);
   }
 </style>

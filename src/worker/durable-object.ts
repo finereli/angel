@@ -8,7 +8,7 @@ import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
 import { getConversation, conversationInfo, renderSeedText } from './conversation-context'
 import { isKnownModel, isReasoningEffort, resolveModel } from './models'
-import { friendlyError, LlmError } from './llm'
+import { friendlyError, LlmError, chatCompletion } from './llm'
 import { userDb, migrate } from './user-db'
 import { runCadenceTool } from './cadence-tools'
 import { WS_PROTOCOL } from './access'
@@ -172,6 +172,14 @@ export class AngelDO implements DurableObject {
         await this.handleCreateSide(ws, msg.title)
         break
 
+      case 'conv:rename':
+        await this.handleRename(msg.conversationId, msg.title)
+        break
+
+      case 'conv:delete':
+        await this.handleDeleteSide(msg.conversationId)
+        break
+
       case 'chat':
         await this.handleChat(msg.conversationId, msg.clientMsgId, msg.content)
         break
@@ -245,13 +253,65 @@ export class AngelDO implements DurableObject {
     if (!agent) return
     const seed = await renderSeedText(this.env, agent.id, agent.conversationId)
     const id = `side-${crypto.randomUUID().slice(0, 8)}`
-    const cleanTitle = (title || '').trim() || `Side chat ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`
+    // No title until there is something to title it from (see titleSideChat).
+    const cleanTitle = (title || '').trim() || null
     await this.env.DB.prepare(
       `INSERT INTO conversations (id, title, agent_id, parent_id, seed, seed_at, source)
        VALUES (?, ?, ?, ?, ?, ?, 'web')`
     ).bind(id, cleanTitle, agent.id, agent.conversationId, seed, new Date().toISOString()).run()
     const row = await getConversation(this.env, id)
     if (row) this.broadcast({ type: 'conv:created', conversation: conversationInfo(row) })
+  }
+
+  private async handleRename(conversationId: string, title: string) {
+    const conv = await getConversation(this.env, conversationId)
+    const clean = (title || '').trim().slice(0, 80)
+    if (!conv?.parent_id || !clean) return // the main line keeps the agent's name
+    await this.env.DB.prepare(`UPDATE conversations SET title = ? WHERE id = ?`).bind(clean, conversationId).run()
+    const row = await getConversation(this.env, conversationId)
+    if (row) this.broadcast({ type: 'conv:updated', conversation: conversationInfo(row) })
+  }
+
+  // Side chats are disposable; the main line is not. What a side chat taught the
+  // agent lives on as observations, so deleting one loses only its transcript.
+  private async handleDeleteSide(conversationId: string) {
+    const conv = await getConversation(this.env, conversationId)
+    if (!conv?.parent_id) return
+    const live = this.activeStreams.get(conversationId)
+    if (live) live.aborted = true
+    await this.env.DB.batch([
+      this.env.DB.prepare(`DELETE FROM documents WHERE conversation_id = ?`).bind(conversationId),
+      this.env.DB.prepare(`DELETE FROM messages WHERE conversation_id = ?`).bind(conversationId),
+      this.env.DB.prepare(`DELETE FROM conversations WHERE id = ?`).bind(conversationId),
+    ])
+    await this.state.storage.delete(`error:${conversationId}`)
+    this.broadcast({ type: 'conv:deleted', conversationId })
+  }
+
+  // Name a side chat from how it began: a few words from the first exchange, or,
+  // if the model can't be reached, the date it started. Runs once, after the
+  // first reply, and never for the main line.
+  private async titleSideChat(conversationId: string, agentModel: string | null) {
+    const conv = await getConversation(this.env, conversationId)
+    if (!conv?.parent_id || conv.title) return
+    const rows = await this.env.DB.prepare(
+      `SELECT role, content FROM messages WHERE conversation_id = ? AND role IN ('user', 'assistant') ORDER BY id LIMIT 2`
+    ).bind(conversationId).all<{ role: string; content: string }>()
+    const user = rows.results.find(r => r.role === 'user')?.content
+    const reply = rows.results.find(r => r.role === 'assistant')?.content
+    if (!user || !reply) return
+    let title = ''
+    try {
+      const res = await chatCompletion(this.env, [
+        { role: 'system', content: 'Write a title of 2 to 5 words for this chat. Reply with the title only: no quotes, no trailing punctuation.' },
+        { role: 'user', content: `${user.slice(0, 500)}\n\n---\n\n${reply.slice(0, 500)}` },
+      ], { model: resolveModel(agentModel), max_tokens: 120, temperature: 0.3 })
+      title = (res.content || '').trim().split('\n')[0]!.replace(/^["'\u201c\u201d\s]+|["'\u201c\u201d.\s]+$/g, '').slice(0, 60)
+    } catch { /* fall through to the date */ }
+    if (!title) title = new Date(conv.created_at.replace(' ', 'T') + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    await this.env.DB.prepare(`UPDATE conversations SET title = ? WHERE id = ? AND title IS NULL`).bind(title, conversationId).run()
+    const row = await getConversation(this.env, conversationId)
+    if (row) this.broadcast({ type: 'conv:updated', conversation: conversationInfo(row) })
   }
 
   private async handleSettingsSet(ws: WebSocket, model: string, reasoningEffort: string | null) {
@@ -409,6 +469,8 @@ export class AngelDO implements DurableObject {
     this.responseChain = respLink.then(() => {}, () => {})
     try { await respLink }
     catch (e) { console.error('[runTurn] response failed:', e instanceof Error ? e.message : e) }
+
+    await this.titleSideChat(conversationId, agentModel).catch(e => console.error('[runTurn] title failed:', e instanceof Error ? e.message : e))
 
     const memLink = this.memoryChain.then(() => this.postStreamWork(conversationId, agentId, agentName, agentModel))
     this.memoryChain = memLink.then(() => {}, () => {})

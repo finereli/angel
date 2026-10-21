@@ -362,6 +362,18 @@ class AngelClient {
         }
         break
 
+      case 'conv:updated':
+        this.conversations = this.conversations.map(c => (c.id === msg.conversation.id ? msg.conversation : c))
+        break
+
+      case 'conv:deleted':
+        this.conversations = this.conversations.filter(c => c.id !== msg.conversationId)
+        delete this.convStates[msg.conversationId]
+        this.#loadedConversations.delete(msg.conversationId)
+        // Standing in a chat that just went away: back to the main line.
+        if (location.hash === `#/side/${msg.conversationId}`) location.hash = '/chat'
+        break
+
       case 'msg:user': {
         const state = this.getConvState(msg.conversationId)
         // Already known (a reload raced the confirmation, or a resend was
@@ -537,6 +549,14 @@ class AngelClient {
         }
       }, 10_000)
     })
+  }
+
+  renameConversation(id: string, title: string) {
+    this.send({ type: 'conv:rename', conversationId: id, title })
+  }
+
+  deleteConversation(id: string) {
+    this.send({ type: 'conv:delete', conversationId: id })
   }
 
   loadConversation(id: string) {

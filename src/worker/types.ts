@@ -194,6 +194,8 @@ export type ClientMsg =
   | { type: 'conv:load'; conversationId: string }
   | { type: 'conv:list' }
   | { type: 'conv:create-side'; title: string }
+  | { type: 'conv:rename'; conversationId: string; title: string }
+  | { type: 'conv:delete'; conversationId: string }
   | { type: 'chat'; conversationId: string; clientMsgId: string; content: string }
   | { type: 'doc:add'; conversationId: string; clientDocId: string; title: string; content: string }
   | { type: 'stop'; conversationId: string }
@@ -207,6 +209,8 @@ export type ServerMsg =
   | { type: 'pong'; ts: number }
   | { type: 'conv:list'; conversations: ConversationInfo[] }
   | { type: 'conv:created'; conversation: ConversationInfo }
+  | { type: 'conv:updated'; conversation: ConversationInfo }
+  | { type: 'conv:deleted'; conversationId: string }
   | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot; pending?: boolean; error?: string }
   | { type: 'account:reset:done' }
   | { type: 'msg:user'; conversationId: string; clientMsgId: string; messageId: number; content: string }
