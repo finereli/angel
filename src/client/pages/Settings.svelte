@@ -74,6 +74,7 @@
 
   <section>
     <h3>Color</h3>
+    <p class="hint">Tints the app and its icon. The rainbow circle takes any color.</p>
     <div class="swatches" role="radiogroup" aria-label="Accent color">
       {#each ACCENTS as a (a.hex)}
         <button
@@ -222,7 +223,7 @@
     font-size: 1.2rem;
     color: var(--text-primary);
   }
-  .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 12px; padding: 4px 4px 2px; }
   .swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
   .swatch.custom {
     position: relative; display: block; overflow: hidden;
