@@ -4,7 +4,7 @@ import { userDb, migrate, type SqlLike, type Transact } from './user-db'
 import { importLegacy } from './legacy-import'
 
 function fake() {
-  const raw = new DatabaseSync(':memory:')
+  const raw = new DatabaseSync(':memory:') // foreign keys enforced, like the real thing
   const sql: SqlLike = {
     exec(query, ...b) {
       if (b.length === 0 && /;\s*\S/.test(query)) { raw.exec(query); return { toArray: () => [] } }
@@ -29,6 +29,9 @@ function legacyWithData() {
   legacy.sql.exec(`UPDATE agents SET cadence_minutes = 45 WHERE id = 'angel'`).toArray()
   for (let i = 1; i <= 450; i++) legacy.sql.exec(`INSERT INTO messages (conversation_id, role, content) VALUES ('main', 'user', ?)`, `m${i}`).toArray()
   legacy.sql.exec(`INSERT INTO lists (id, name, description, load_mode, agent_id) VALUES ('l-extra', 'extra', 'x', 'on-demand', 'angel')`).toArray()
+  // Item 1 was superseded by item 2: copied in rowid order, it points forward.
+  legacy.sql.exec(`INSERT INTO list_items (id, list_id, content) VALUES (2, 'l-extra', 'new')`).toArray()
+  legacy.sql.exec(`INSERT INTO list_items (id, list_id, content, superseded_by) VALUES (1, 'l-extra', 'old', 2)`).toArray()
   return legacy
 }
 
@@ -51,6 +54,7 @@ describe('legacy import', () => {
     expect((await local.db.prepare('SELECT COUNT(*) AS c FROM lists').first<{ c: number }>())?.c).toBe(3) // 2 seeded + extra
     expect(await local.db.prepare(`SELECT name FROM sqlite_master WHERE name = 'users'`).first()).toBeNull()
     expect(store.get()?.done).toContain('messages')
+    expect((await local.db.prepare('SELECT superseded_by AS s FROM list_items WHERE id = 1').first<{ s: number }>())?.s).toBe(2)
   })
 
   it('does nothing when the old database holds no messages', async () => {

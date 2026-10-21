@@ -26,8 +26,15 @@ function tablesOf(sql: SqlLike): string[] {
 
 // Returns true when the import is finished (or there was nothing to import).
 export async function importLegacy(
-  legacy: D1Database, sql: SqlLike, transact: Transact, getProgress: () => Progress | null, setProgress: (p: Progress) => void,
+  legacy: D1Database, sql: SqlLike, rawTransact: Transact, getProgress: () => Progress | null, setProgress: (p: Progress) => void,
 ): Promise<boolean> {
+  // Rows arrive in rowid order, so a row can point at one that hasn't landed yet
+  // (list_items.superseded_by does). Defer the foreign key check to commit, by
+  // which time the whole chunk's targets exist.
+  const transact: Transact = (fn) => rawTransact(() => {
+    sql.exec('PRAGMA defer_foreign_keys = ON').toArray()
+    return fn()
+  })
   let progress = getProgress()
   if (!progress) {
     // Nothing to import: D1 never had the old tables, or they hold no messages.
