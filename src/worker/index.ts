@@ -11,8 +11,6 @@ import {
 import { mcpHandler } from './mcp'
 
 export { AngelDO } from './durable-object'
-// The workspace container's Durable Object class (see worker/sandbox.ts).
-export { Sandbox } from '@cloudflare/sandbox'
 
 type AppContext = { Bindings: Env }
 const app = new Hono<AppContext>()

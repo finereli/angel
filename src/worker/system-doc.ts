@@ -22,7 +22,7 @@ Wake-ups come from a recurring cadence you control (agents.cadence_minutes). A D
 
 Storage is D1 (SQLite): your stream, observations and their summaries, tags, lists, documents, saved scripts, wake-ups, and logs.
 
-You can change your own mind in here - your lists, observations, documents, scripts, workspace files, and cadence. You cannot change the code you run on. When the system itself needs changing, a separate support agent outside the machine does it; you live inside, which is why you cannot break it.`
+You can change your own mind in here - your lists, observations, documents, scripts, and cadence. You cannot change the code you run on. When the system itself needs changing, a separate support agent outside the machine does it; you live inside, which is why you cannot break it.`
 
 export function buildSystemDoc(): string {
   const models = MODEL_CATALOG

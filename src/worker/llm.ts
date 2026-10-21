@@ -7,7 +7,7 @@ const OVERALL_MS = 180_000  // abort if the whole call runs past this
 const NONSTREAM_MS = 120_000
 
 export function getModel(env: Env, agentModel?: string | null): string {
-  return agentModel || env.DEEPSEEK_MODEL || 'deepseek/deepseek-v4-flash-0731'
+  return agentModel || env.DEEPSEEK_MODEL || 'deepseek/deepseek-v4.1-flash-1017'
 }
 
 const headers = (env: Env) => ({

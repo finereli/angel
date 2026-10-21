@@ -19,21 +19,13 @@
   "ai": { "binding": "AI" },
   "durable_objects": {
     "bindings": [
-      { "name": "ANGEL_DO", "class_name": "AngelDO" },
-      { "name": "Sandbox", "class_name": "Sandbox" }
+      { "name": "ANGEL_DO", "class_name": "AngelDO" }
     ]
   },
-  "containers": [
-    {
-      "class_name": "Sandbox",
-      "image": "./Dockerfile",
-      "instance_type": "basic",
-      "max_instances": 1
-    }
-  ],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["AngelDO"] },
-    { "tag": "v2", "new_sqlite_classes": ["Sandbox"] }
+    { "tag": "v2", "new_sqlite_classes": ["Sandbox"] },
+    { "tag": "v3", "deleted_classes": ["Sandbox"] }
   ],
   "triggers": {
     "crons": ["*/5 * * * *"]
