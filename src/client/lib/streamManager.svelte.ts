@@ -476,6 +476,9 @@ class AngelClient {
         break
       }
 
+      case 'agent:renamed':
+        if (this.agent) this.agent = { ...this.agent, name: msg.name }
+        break
       case 'agent:updated':
         this.agent = msg.agent
         this.settingsError = null

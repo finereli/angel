@@ -235,4 +235,7 @@ CREATE INDEX idx_conversations_parent ON conversations(parent_id);
 -- resist changing their own personality when asked to mid-conversation.
 ALTER TABLE agents ADD COLUMN voice TEXT DEFAULT NULL;
 `,
+`-- The main line is called Main, not after the agent: the agent can now rename itself.
+UPDATE conversations SET title = 'Main' WHERE id = 'main' AND parent_id IS NULL;
+`,
 ]

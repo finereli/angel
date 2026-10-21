@@ -219,6 +219,7 @@ export type ServerMsg =
   | { type: 'conv:updated'; conversation: ConversationInfo }
   | { type: 'conv:deleted'; conversationId: string }
   | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot; pending?: boolean; error?: string }
+  | { type: 'agent:renamed'; name: string }
   | { type: 'account:reset:done' }
   | { type: 'msg:user'; conversationId: string; clientMsgId: string; messageId: number; content: string }
   | { type: 'text'; conversationId: string; seq: number; content: string }

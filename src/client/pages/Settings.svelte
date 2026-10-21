@@ -70,6 +70,12 @@
   {/if}
 
   <section>
+    <h3>Name</h3>
+    <p class="name">{angel.agent?.name ?? ''}</p>
+    <p class="hint">To call {angel.agent?.name || 'Angel'} something else, just ask in the chat.</p>
+  </section>
+
+  <section>
     <h3>Model</h3>
     <p class="hint">Which model {angel.agent?.name || 'Angel'} thinks with. Prices are per 1M tokens, input / output.</p>
     <!-- Until the server says which model is saved, the box stays empty and
@@ -189,6 +195,7 @@
     font-size: 1.2rem;
     color: var(--text-primary);
   }
+  .name { font-size: 1rem; color: var(--text-primary); min-height: 1.5em; }
   section {
     margin-bottom: 28px;
   }
