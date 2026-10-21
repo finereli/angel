@@ -262,4 +262,10 @@ CREATE TABLE connectors (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `,
+`-- The seeded lists named the agent, which goes stale once it renames itself.
+UPDATE lists SET description = 'Operating instructions you maintain for yourself.'
+  WHERE id = 'list-instructions' AND description = 'Operating instructions Angel maintains for himself.';
+UPDATE lists SET description = 'How you organize your memory and what is worth remembering.'
+  WHERE id = 'list-memory' AND description = 'How Angel organizes his memory and what is worth remembering.';
+`,
 ]
