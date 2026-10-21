@@ -13,9 +13,11 @@
   import ConnectorsSettings from './pages/settings/ConnectorsSettings.svelte'
   import ConnectorDetail from './pages/settings/ConnectorDetail.svelte'
   import AccountSettings from './pages/settings/AccountSettings.svelte'
+  import ThemeSettings from './pages/settings/ThemeSettings.svelte'
   import { angel, connectorLabel } from './lib/streamManager.svelte'
   import { router, parentOf } from './lib/router.svelte'
-  import { isDark, setDarkMode } from '$shared/lib/theme'
+  import ResetButton from '$shared/ui/ResetButton.svelte'
+  import { appearance } from './lib/appearance.svelte'
   import { setAccent, storedAccent } from './lib/accent'
 
   router.start()
@@ -38,7 +40,7 @@
   })
   const title = $derived(
     route.view === 'settings'
-      ? (route.section === 'angel' ? agentName : route.section === 'connectors' ? 'Connectors' : route.section === 'account' ? 'Account' : 'Settings')
+      ? (route.section === 'angel' ? agentName : route.section === 'connectors' ? 'Connectors' : route.section === 'account' ? 'Account' : route.section === 'theme' ? 'Theme' : 'Settings')
       : route.view === 'connector' ? connectorTitle!
       : route.view === 'side' ? sideTitle || 'New chat' : agentName,
   )
@@ -50,9 +52,6 @@
     location.hash = hash
   }
 
-  const who = $derived(angel.user?.name || angel.user?.email || (angel.devSession ? 'Dev session' : ''))
-  const whoEmail = $derived(angel.user?.name ? angel.user.email : '')
-  const initial = $derived((who[0] || '?').toUpperCase())
   async function newSideChat() {
     menuOpen = false
     const id = await angel.createSideConversation('')
@@ -87,11 +86,8 @@
     confirmingDelete = null
   }
 
-  let dark = $state(isDark())
-  function toggleDark() {
-    dark = !dark
-    setDarkMode(dark, angel.agent?.accent ?? storedAccent())
-  }
+  appearance.accent = () => angel.agent?.accent ?? storedAccent()
+  const dark = $derived(appearance.dark)
   // The saved accent follows the person across devices; this device caches it.
   $effect(() => {
     if (angel.agentLoaded) setAccent(angel.agent?.accent ?? null)
@@ -123,6 +119,7 @@
       {#if route.view === 'settings'}
         {#if route.section === 'angel'}<AngelSettings />
         {:else if route.section === 'connectors'}<ConnectorsSettings />
+        {:else if route.section === 'theme'}<ThemeSettings />
         {:else if route.section === 'account'}<AccountSettings />
         {:else}<SettingsIndex />{/if}
       {:else if route.view === 'connector'}
@@ -202,18 +199,8 @@
 
     {#snippet footer()}
       <div class="account">
-        <div class="who">
-          {#if angel.user?.picture}
-            <img class="avatar" src={angel.user.picture} alt="" referrerpolicy="no-referrer" />
-          {:else}
-            <span class="avatar initial" aria-hidden="true">{initial}</span>
-          {/if}
-          <span class="who-text">
-            <span class="who-name">{who}</span>
-            {#if whoEmail}<span class="who-email">{whoEmail}</span>{/if}
-          </span>
-        </div>
-        <button class="icon-btn" onclick={toggleDark} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'} tabindex={menuOpen ? 0 : -1}>
+        <ResetButton tabindex={menuOpen ? 0 : -1} />
+        <button class="icon-btn" onclick={() => appearance.toggle()} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'} tabindex={menuOpen ? 0 : -1}>
           <Icon name={dark ? 'light_mode' : 'dark_mode'} size={20} />
         </button>
         <button class="icon-btn" class:current={isSettings} onclick={() => go('/settings')} aria-label="Settings" title="Settings" tabindex={menuOpen ? 0 : -1}>
@@ -379,28 +366,9 @@
   .account {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 4px;
   }
-  .who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
-  .avatar {
-    width: 32px;
-    height: 32px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    object-fit: cover;
-  }
-  .avatar.initial {
-    display: grid;
-    place-items: center;
-    background: var(--accent-deep);
-    color: #fff;
-    font-size: 0.85rem;
-    font-weight: 500;
-  }
-  .who-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
-  .who-name, .who-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .who-name { font-size: 0.85rem; color: var(--text-primary); }
-  .who-email { font-size: 0.72rem; color: var(--text-secondary); }
   .icon-btn {
     width: 36px;
     height: 36px;

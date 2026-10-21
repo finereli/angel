@@ -1,15 +1,12 @@
 <script lang="ts">
   import SettingsPage from './SettingsPage.svelte'
   import { angel } from '../../lib/streamManager.svelte'
-  import { ACCENTS, DEFAULT_ACCENT, setAccent as previewAccent } from '../../lib/accent'
   import { DEFAULT_VOICE, effectiveVoice } from '../../../worker/voice'
   import { MODEL_CATALOG, REASONING_EFFORTS, modelSupportsReasoning, resolveModel, modelLabel } from '../../../worker/models'
 
   const selectedModel = $derived(resolveModel(angel.agent?.model))
   const selectedEffort = $derived(angel.agent?.reasoningEffort ?? null)
   const reasoningSupported = $derived(modelSupportsReasoning(selectedModel))
-  const currentAccent = $derived((angel.agent?.accent ?? DEFAULT_ACCENT).toLowerCase())
-  const isCustomAccent = $derived(!ACCENTS.some(a => a.hex === currentAccent))
   const loaded = $derived(angel.agentLoaded)
 
   const price = (n: number) => `$${n.toFixed(2)}`
@@ -62,37 +59,6 @@
   {#if angel.settingsError}
     <p class="error">{angel.settingsError}</p>
   {/if}
-
-  <section>
-    <h3>Color</h3>
-    <p class="hint">Tints the app and its icon. The rainbow circle takes any color.</p>
-    <div class="swatches" role="radiogroup" aria-label="Accent color">
-      {#each ACCENTS as a (a.hex)}
-        <button
-          class="swatch"
-          class:on={(angel.agent?.accent ?? DEFAULT_ACCENT) === a.hex}
-          style="background: {a.hex}"
-          role="radio"
-          aria-checked={(angel.agent?.accent ?? DEFAULT_ACCENT) === a.hex}
-          aria-label={a.name}
-          title={a.name}
-          disabled={!angel.agentLoaded}
-          onclick={() => angel.setAccent(a.hex === DEFAULT_ACCENT ? null : a.hex)}
-        ></button>
-      {/each}
-      <!-- Any colour: previews while dragging, saves when the picker closes. -->
-      <label class="swatch custom" class:on={isCustomAccent} title="Pick any color" style={isCustomAccent ? `--picked: ${currentAccent}` : ''}>
-        <input
-          type="color"
-          aria-label="Custom color"
-          value={currentAccent}
-          disabled={!angel.agentLoaded}
-          oninput={(e) => previewAccent(e.currentTarget.value)}
-          onchange={(e) => angel.setAccent(e.currentTarget.value)}
-        />
-      </label>
-    </div>
-  </section>
 
   <section>
     <h3>Model</h3>
@@ -174,21 +140,6 @@
 </SettingsPage>
 
 <style>
-  .swatches { display: flex; flex-wrap: wrap; gap: 12px; padding: 4px 4px 2px; }
-  .swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
-  /* clip-path, not just border-radius: the native colour input paints its own
-     square swatch, and overflow clipping does not always round it. */
-  .swatch.custom {
-    position: relative; display: block; border: 0; outline: none;
-    clip-path: circle(50%);
-    background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
-  }
-  .swatch.custom.on { box-shadow: inset 0 0 0 5px var(--picked), inset 0 0 0 7px var(--bg-surface); }
-  .swatch.custom:focus-within { box-shadow: inset 0 0 0 2px var(--bg-surface), inset 0 0 0 4px var(--text-primary); }
-  .swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
-  .swatch.on:not(.custom) { outline: 2px solid var(--text-primary); outline-offset: 2px; }
-  .swatch:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
-  .swatch:disabled { opacity: 0.5; cursor: default; }
   .option {
     display: flex;
     align-items: center;

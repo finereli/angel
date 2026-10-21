@@ -3,7 +3,7 @@
 // manifest starts at /chat).
 import { Router } from '$shared/lib/router.svelte'
 
-export type SettingsSection = 'angel' | 'connectors' | 'account'
+export type SettingsSection = 'angel' | 'theme' | 'connectors' | 'account'
 
 export type Route =
   | { view: 'chat' }
@@ -11,7 +11,7 @@ export type Route =
   | { view: 'settings'; section?: SettingsSection }
   | { view: 'connector'; id: string }
 
-const SECTIONS: SettingsSection[] = ['angel', 'connectors', 'account']
+const SECTIONS: SettingsSection[] = ['angel', 'theme', 'connectors', 'account']
 
 export const router = new Router<Route>({
   home: '/chat',

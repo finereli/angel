@@ -3,6 +3,8 @@
   import Chevron from './Chevron.svelte'
   import { angel } from '../../lib/streamManager.svelte'
   import { modelLabel, resolveModel } from '../../../worker/models'
+  import { appearance } from '../../lib/appearance.svelte'
+  import { ACCENTS, DEFAULT_ACCENT } from '../../lib/accent'
 
   const name = $derived(angel.agent?.name || 'Angel')
   const angelSub = $derived(angel.agentLoaded ? modelLabel(resolveModel(angel.agent?.model)) : 'Model, voice, thinking effort')
@@ -15,6 +17,11 @@
     if (!ok) return `${waiting} need${waiting === 1 ? 's' : ''} attention`
     return `${ok} connected${waiting ? `, ${waiting} need${waiting === 1 ? 's' : ''} attention` : ''}`
   })
+  const themeSub = $derived.by(() => {
+    const mode = appearance.mode === 'device' ? 'Matches device' : appearance.mode === 'dark' ? 'Dark' : 'Light'
+    const hex = (angel.agent?.accent ?? DEFAULT_ACCENT).toLowerCase()
+    return `${mode}, ${ACCENTS.find(a => a.hex === hex)?.name.toLowerCase() ?? 'custom color'}`
+  })
   const accountSub = $derived(angel.user?.email || (angel.devSession ? 'Local development session' : 'Sign-in, your data, version'))
 </script>
 
@@ -23,6 +30,12 @@
     <li>
       <a href="#/settings/angel">
         <span class="row-text"><span class="row-title">{name}</span><span class="row-sub">{angelSub}</span></span>
+        <Chevron />
+      </a>
+    </li>
+    <li>
+      <a href="#/settings/theme">
+        <span class="row-text"><span class="row-title">Theme</span><span class="row-sub">{themeSub}</span></span>
         <Chevron />
       </a>
     </li>
