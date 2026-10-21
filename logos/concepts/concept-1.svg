@@ -1,57 +1,15 @@
-<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="c1-wing" x1="140" y1="380" x2="380" y2="150" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#6366f1"/>
-      <stop offset="1" stop-color="#a855f7"/>
-    </linearGradient>
-    <linearGradient id="c1-halo" x1="180" y1="120" x2="332" y2="120" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fde68a"/>
-      <stop offset="1" stop-color="#fbbf24"/>
-    </linearGradient>
-    <radialGradient id="c1-glow" cx="256" cy="256" r="240" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#6366f1" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="c1-soft" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="7"/>
-    </filter>
-  </defs>
-
-  <g id="bg">
-    <rect x="0" y="0" width="512" height="512" rx="112" fill="#1a1a2e"/>
-    <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#c1-glow)"/>
-  </g>
-
-  <g id="icon">
-    <!-- soft glow underlay for the wing -->
-    <g filter="url(#c1-soft)" opacity="0.7">
-      <path d="M150 372
-               C150 300 196 250 268 226
-               C232 262 224 300 236 336
-               C286 300 320 258 336 206
-               C338 262 322 316 280 356
-               C246 388 196 392 150 372 Z"
-            fill="url(#c1-wing)"/>
-    </g>
-
-    <!-- the wing: sweeping upward, suggested feathers -->
-    <path d="M150 372
-             C150 300 196 250 268 226
-             C232 262 224 300 236 336
-             C286 300 320 258 336 206
-             C338 262 322 316 280 356
-             C246 388 196 392 150 372 Z"
-          fill="url(#c1-wing)"/>
-
-    <!-- feather separations, cut in with bg color -->
-    <path d="M236 336 C258 314 274 286 286 252" fill="none" stroke="#1a1a2e" stroke-width="10" stroke-linecap="round"/>
-    <path d="M196 356 C214 328 224 300 228 270" fill="none" stroke="#1a1a2e" stroke-width="10" stroke-linecap="round"/>
-  </g>
-
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect id="background" width="512" height="512" rx="112" fill="#6366f1"/>
   <g id="halo">
-    <!-- soft halo glow -->
-    <ellipse cx="256" cy="120" rx="86" ry="34" fill="none" stroke="url(#c1-halo)" stroke-width="26" opacity="0.35" filter="url(#c1-soft)"/>
-    <!-- crisp halo ring, tilted -->
-    <ellipse cx="256" cy="120" rx="80" ry="30" fill="none" stroke="url(#c1-halo)" stroke-width="16"/>
+    <path d="M176 112 C176 78 222 64 258 66 C298 64 342 80 338 114 C334 146 290 156 254 154 C214 156 176 142 176 112 Z M222 112 C224 124 240 128 256 127 C276 128 292 124 294 112 C292 100 276 94 256 95 C238 94 220 100 222 112 Z" fill="#fcd34d" fill-rule="evenodd"/>
+  </g>
+  <g id="icon">
+    <path d="M256 180 C190 178 144 226 142 292 C141 340 138 388 132 416 C150 428 166 404 184 410 C204 418 214 442 234 440 C250 438 254 420 270 424 C290 428 296 446 316 442 C334 438 338 412 358 410 C374 408 384 426 394 414 C388 384 372 340 370 292 C368 226 322 182 256 180 Z" fill="#ffffff"/>
+    <path d="M150 360 C158 392 156 408 150 420 C166 424 176 408 188 412 C176 396 166 380 150 360 Z" fill="#a5b4fc"/>
+    <ellipse cx="214" cy="288" rx="17" ry="21" fill="#4f46e5"/>
+    <ellipse cx="300" cy="288" rx="17" ry="21" fill="#4f46e5"/>
+    <path d="M232 332 C242 350 270 350 282 332 C270 340 244 340 232 332 Z" fill="#4f46e5" stroke="#4f46e5" stroke-width="8" stroke-linejoin="round"/>
+    <ellipse cx="180" cy="326" rx="16" ry="11" fill="#a5b4fc"/>
+    <ellipse cx="334" cy="326" rx="16" ry="11" fill="#a5b4fc"/>
   </g>
 </svg>

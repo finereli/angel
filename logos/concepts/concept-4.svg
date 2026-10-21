@@ -1,33 +1,19 @@
-<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="c4-core-glow" cx="50%" cy="46%" r="60%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="38%" stop-color="#e0e7ff"/>
-      <stop offset="72%" stop-color="#a5b4fc"/>
-      <stop offset="100%" stop-color="#6366f1"/>
-    </radialGradient>
-    <radialGradient id="c4-aura" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#a5b4fc" stop-opacity="0.55"/>
-      <stop offset="55%" stop-color="#6366f1" stop-opacity="0.20"/>
-      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="c4-halo" x1="18%" y1="12%" x2="82%" y2="88%">
-      <stop offset="0%" stop-color="#22d3ee"/>
-      <stop offset="50%" stop-color="#818cf8"/>
-      <stop offset="100%" stop-color="#6366f1"/>
-    </linearGradient>
-  </defs>
-
-  <g id="bg">
-    <rect x="0" y="0" width="512" height="512" rx="112" fill="#0c0c1d"/>
-  </g>
-
-  <g id="halo">
-    <circle cx="256" cy="256" r="150" fill="url(#c4-aura)"/>
-    <circle cx="256" cy="256" r="150" fill="none" stroke="url(#c4-halo)" stroke-width="18" stroke-linecap="round"/>
-  </g>
-
-  <g id="core">
-    <circle cx="256" cy="248" r="88" fill="url(#c4-core-glow)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect id="background" width="512" height="512" rx="112" fill="#6366f1"/>
+  <g id="icon">
+    <g id="halo">
+      <ellipse cx="256" cy="116" rx="96" ry="26" fill="none" stroke="#fcd34d" stroke-width="20" transform="rotate(-8 256 116)"/>
+    </g>
+    <g id="spark">
+      <path d="M404 150 C408 178 418 188 446 192 C418 196 408 206 404 234 C400 206 390 196 362 192 C390 188 400 178 404 150 Z" fill="#fcd34d"/>
+    </g>
+    <g id="face">
+      <path d="M256 164 C340 160 408 218 408 304 C408 392 340 446 256 446 C172 446 104 392 104 304 C104 218 172 168 256 164 Z" fill="#ffffff"/>
+      <path d="M130 330 C150 410 230 440 300 424 C250 440 160 420 130 330 Z" fill="#a5b4fc"/>
+      <circle cx="200" cy="284" r="24" fill="#4f46e5"/>
+      <path d="M284 284 C300 306 332 306 348 284" fill="none" stroke="#4f46e5" stroke-width="14" stroke-linecap="round"/>
+      <path d="M216 350 C240 384 288 384 312 350" fill="none" stroke="#4f46e5" stroke-width="14" stroke-linecap="round"/>
+      <circle cx="160" cy="342" r="16" fill="#fcd34d" opacity="0.7"/>
+    </g>
   </g>
 </svg>

@@ -109,13 +109,17 @@
 
   <Drawer open={menuOpen} onclose={() => (menuOpen = false)}>
     {#snippet brand()}
-      <button class="brand-link" class:current={route.view === 'chat'} onclick={() => go('/chat')} tabindex={menuOpen ? 0 : -1}>
+      <div class="brand-link">
         <strong>{agentName}</strong>
         <span class="status-dot" class:connected={angel.connState === 'connected'} class:reconnecting={angel.connState !== 'connected'} title={angel.connState === 'connected' ? 'Connected' : 'Connecting...'}></span>
-      </button>
+      </div>
     {/snippet}
 
     {#snippet list()}
+      <div class="row main-row" class:current={route.view === 'chat'}>
+        <button class="row-main" onclick={() => go('/chat')} tabindex={menuOpen ? 0 : -1}>Main chat</button>
+      </div>
+
       <div class="side-head">
         <span class="side-label">Side chats</span>
         <button class="icon-btn small" onclick={newSideChat} aria-label="New side chat" title="New side chat" tabindex={menuOpen ? 0 : -1}>
@@ -241,7 +245,7 @@
     color: var(--text-primary);
     font-size: 1.05rem;
   }
-  .brand-link.current strong { color: var(--accent-text); }
+  .main-row { margin-bottom: 14px; }
 
   .side-head {
     display: flex;
