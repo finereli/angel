@@ -178,6 +178,10 @@ class AngelClient {
     this.send({ type: 'settings:voice', voice })
   }
 
+  setAccent(accent: string | null) {
+    this.send({ type: 'settings:accent', accent })
+  }
+
   updateSettings(model: string, reasoningEffort: string | null) {
     this.settingsError = null
     this.send({ type: 'settings:set', model, reasoningEffort })

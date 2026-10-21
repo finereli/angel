@@ -201,6 +201,10 @@ export class AngelDO implements DurableObject {
         await this.handleSettingsSet(ws, msg.model, msg.reasoningEffort)
         break
 
+      case 'settings:accent':
+        await this.handleAccentSet(msg.accent)
+        break
+
       case 'settings:voice':
         await this.handleVoiceSet(msg.voice)
         break
@@ -258,16 +262,16 @@ export class AngelDO implements DurableObject {
   // both tables generic; the UI just never asks for more than the first row.
   private async loadAgent(): Promise<AgentInfo | null> {
     const row = await this.env.DB.prepare(
-      `SELECT a.id, a.name, a.model, a.reasoning_effort, a.voice, c.id as conversation_id,
+      `SELECT a.id, a.name, a.model, a.reasoning_effort, a.voice, a.accent, c.id as conversation_id,
               EXISTS (SELECT 1 FROM messages) AS has_history
        FROM agents a JOIN conversations c ON c.agent_id = a.id
        WHERE c.parent_id IS NULL
        ORDER BY a.created_at, c.created_at LIMIT 1`
-    ).first<{ id: string; name: string; model: string | null; reasoning_effort: string | null; voice: string | null; conversation_id: string; has_history: number }>()
+    ).first<{ id: string; name: string; model: string | null; reasoning_effort: string | null; voice: string | null; accent: string | null; conversation_id: string; has_history: number }>()
     return row
       ? {
           id: row.id, name: row.name, conversationId: row.conversation_id, model: row.model,
-          reasoningEffort: row.reasoning_effort, voice: row.voice, hasHistory: row.has_history === 1,
+          reasoningEffort: row.reasoning_effort, voice: row.voice, accent: row.accent, hasHistory: row.has_history === 1,
         }
       : null
   }
@@ -373,6 +377,15 @@ export class AngelDO implements DurableObject {
     if (!agent) return
     await this.env.DB.prepare(`UPDATE agents SET voice = ? WHERE id = ?`).bind(clean, agent.id).run()
     this.broadcast({ type: 'agent:updated', agent: { ...agent, voice: clean } })
+  }
+
+  private async handleAccentSet(accent: string | null) {
+    // null puts the default back; anything else must be a plain #rrggbb.
+    if (accent !== null && !/^#[0-9a-f]{6}$/i.test(accent)) return
+    const agent = await this.loadAgent()
+    if (!agent) return
+    await this.env.DB.prepare(`UPDATE agents SET accent = ? WHERE id = ?`).bind(accent, agent.id).run()
+    this.broadcast({ type: 'agent:updated', agent: { ...agent, accent } })
   }
 
   private async resolveAgent(conversationId: string): Promise<{ agentId: string; agentName: string; agentModel: string | null; agentReasoningEffort: string | null } | null> {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { angel } from '../lib/streamManager.svelte'
+  import { ACCENTS, DEFAULT_ACCENT } from '../lib/accent'
   import ResetButton from '$shared/ui/ResetButton.svelte'
   import { DEFAULT_VOICE, effectiveVoice } from '../../worker/voice'
   import { MODEL_CATALOG, REASONING_EFFORTS, modelSupportsReasoning, resolveModel, modelLabel } from '../../worker/models'
@@ -73,6 +74,25 @@
     <h3>Name</h3>
     <p class="name">{angel.agent?.name ?? ''}</p>
     <p class="hint">To call {angel.agent?.name || 'Angel'} something else, just ask in the chat.</p>
+  </section>
+
+  <section>
+    <h3>Color</h3>
+    <div class="swatches" role="radiogroup" aria-label="Accent color">
+      {#each ACCENTS as a (a.hex)}
+        <button
+          class="swatch"
+          class:on={(angel.agent?.accent ?? DEFAULT_ACCENT) === a.hex}
+          style="background: {a.hex}"
+          role="radio"
+          aria-checked={(angel.agent?.accent ?? DEFAULT_ACCENT) === a.hex}
+          aria-label={a.name}
+          title={a.name}
+          disabled={!angel.agentLoaded}
+          onclick={() => angel.setAccent(a.hex === DEFAULT_ACCENT ? null : a.hex)}
+        ></button>
+      {/each}
+    </div>
   </section>
 
   <section>
@@ -195,6 +215,11 @@
     font-size: 1.2rem;
     color: var(--text-primary);
   }
+  .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+  .swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+  .swatch.on { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+  .swatch:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+  .swatch:disabled { opacity: 0.5; cursor: default; }
   .name { font-size: 1rem; color: var(--text-primary); min-height: 1.5em; }
   section {
     margin-bottom: 28px;

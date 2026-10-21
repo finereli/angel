@@ -12,6 +12,7 @@
   import { angel } from './lib/streamManager.svelte'
   import { router } from './lib/router.svelte'
   import { isDark, setDarkMode } from '$shared/lib/theme'
+  import { setAccent, storedAccent } from './lib/accent'
 
   router.start()
 
@@ -72,8 +73,12 @@
   let dark = $state(isDark())
   function toggleDark() {
     dark = !dark
-    setDarkMode(dark)
+    setDarkMode(dark, angel.agent?.accent ?? storedAccent())
   }
+  // The saved accent follows the person across devices; this device caches it.
+  $effect(() => {
+    if (angel.agentLoaded) setAccent(angel.agent?.accent ?? null)
+  })
 
 </script>
 

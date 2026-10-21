@@ -190,6 +190,8 @@ export interface AgentInfo {
   reasoningEffort: string | null
   // How Angel sounds, set by the person in Settings (never by Angel in chat).
   voice: string | null
+  // The accent colour (#rrggbb) the person picked, or null for the default.
+  accent: string | null
   // Whether there is any conversation yet, so Settings knows if a model change needs a warning.
   hasHistory: boolean
 }
@@ -207,6 +209,7 @@ export type ClientMsg =
   | { type: 'stop'; conversationId: string }
   | { type: 'settings:set'; model: string; reasoningEffort: string | null }
   | { type: 'settings:voice'; voice: string | null }
+  | { type: 'settings:accent'; accent: string | null }
   | { type: 'retry'; conversationId: string }
   | { type: 'account:reset' }
 

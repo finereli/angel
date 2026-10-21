@@ -238,4 +238,7 @@ ALTER TABLE agents ADD COLUMN voice TEXT DEFAULT NULL;
 `-- The main line is called Main, not after the agent: the agent can now rename itself.
 UPDATE conversations SET title = 'Main' WHERE id = 'main' AND parent_id IS NULL;
 `,
+`-- The accent colour the person picked in Settings, as #rrggbb. NULL = the app default.
+ALTER TABLE agents ADD COLUMN accent TEXT DEFAULT NULL;
+`,
 ]
