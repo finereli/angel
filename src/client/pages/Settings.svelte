@@ -1,6 +1,6 @@
 <script lang="ts">
   import { angel } from '../lib/streamManager.svelte'
-  import { ACCENTS, DEFAULT_ACCENT } from '../lib/accent'
+  import { ACCENTS, DEFAULT_ACCENT, setAccent as previewAccent } from '../lib/accent'
   import ResetButton from '$shared/ui/ResetButton.svelte'
   import { DEFAULT_VOICE, effectiveVoice } from '../../worker/voice'
   import { MODEL_CATALOG, REASONING_EFFORTS, modelSupportsReasoning, resolveModel, modelLabel } from '../../worker/models'
@@ -8,6 +8,8 @@
   const selectedModel = $derived(resolveModel(angel.agent?.model))
   const selectedEffort = $derived(angel.agent?.reasoningEffort ?? null)
   const reasoningSupported = $derived(modelSupportsReasoning(selectedModel))
+  const currentAccent = $derived((angel.agent?.accent ?? DEFAULT_ACCENT).toLowerCase())
+  const isCustomAccent = $derived(!ACCENTS.some(a => a.hex === currentAccent))
   const loaded = $derived(angel.agentLoaded)
 
   const price = (n: number) => `$${n.toFixed(2)}`
@@ -71,12 +73,6 @@
   {/if}
 
   <section>
-    <h3>Name</h3>
-    <p class="name">{angel.agent?.name ?? ''}</p>
-    <p class="hint">To call {angel.agent?.name || 'Angel'} something else, just ask in the chat.</p>
-  </section>
-
-  <section>
     <h3>Color</h3>
     <div class="swatches" role="radiogroup" aria-label="Accent color">
       {#each ACCENTS as a (a.hex)}
@@ -92,6 +88,17 @@
           onclick={() => angel.setAccent(a.hex === DEFAULT_ACCENT ? null : a.hex)}
         ></button>
       {/each}
+      <!-- Any colour: previews while dragging, saves when the picker closes. -->
+      <label class="swatch custom" class:on={isCustomAccent} title="Pick any color" style={isCustomAccent ? `--picked: ${currentAccent}` : ''}>
+        <input
+          type="color"
+          aria-label="Custom color"
+          value={currentAccent}
+          disabled={!angel.agentLoaded}
+          oninput={(e) => previewAccent(e.currentTarget.value)}
+          onchange={(e) => angel.setAccent(e.currentTarget.value)}
+        />
+      </label>
     </div>
   </section>
 
@@ -217,10 +224,15 @@
   }
   .swatches { display: flex; flex-wrap: wrap; gap: 10px; }
   .swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+  .swatch.custom {
+    position: relative; display: block; overflow: hidden;
+    background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+  }
+  .swatch.custom.on { box-shadow: inset 0 0 0 5px var(--picked), inset 0 0 0 7px var(--bg-surface); }
+  .swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
   .swatch.on { outline: 2px solid var(--text-primary); outline-offset: 2px; }
   .swatch:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
   .swatch:disabled { opacity: 0.5; cursor: default; }
-  .name { font-size: 1rem; color: var(--text-primary); min-height: 1.5em; }
   section {
     margin-bottom: 28px;
   }
