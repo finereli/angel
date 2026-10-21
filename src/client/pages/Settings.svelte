@@ -225,13 +225,17 @@
   }
   .swatches { display: flex; flex-wrap: wrap; gap: 12px; padding: 4px 4px 2px; }
   .swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+  /* clip-path, not just border-radius: the native colour input paints its own
+     square swatch, and overflow clipping does not always round it. */
   .swatch.custom {
-    position: relative; display: block; overflow: hidden;
+    position: relative; display: block; border: 0; outline: none;
+    clip-path: circle(50%);
     background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
   }
   .swatch.custom.on { box-shadow: inset 0 0 0 5px var(--picked), inset 0 0 0 7px var(--bg-surface); }
-  .swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-  .swatch.on { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+  .swatch.custom:focus-within { box-shadow: inset 0 0 0 2px var(--bg-surface), inset 0 0 0 4px var(--text-primary); }
+  .swatch.custom input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+  .swatch.on:not(.custom) { outline: 2px solid var(--text-primary); outline-offset: 2px; }
   .swatch:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
   .swatch:disabled { opacity: 0.5; cursor: default; }
   section {
