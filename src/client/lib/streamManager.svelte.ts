@@ -1,10 +1,15 @@
 import { login } from './login'
 import type { LoginUser } from '$shared/lib/finereli-login'
 import type {
-  ClientMsg, ServerMsg, MessageRow, StreamSnapshot, StreamPart, AgentInfo, ConversationInfo,
+  ClientMsg, ServerMsg, MessageRow, StreamSnapshot, StreamPart, AgentInfo, ConversationInfo, ConnectorInfo,
 } from '../../worker/types'
 
-export type { StreamPart }
+export type { StreamPart, ConnectorInfo }
+
+// What to call a connector on screen: the server's own name once it has said
+// it, until then the short name, capitalised.
+export const connectorLabel = (c: Pick<ConnectorInfo, 'serverName' | 'name'>) =>
+  c.serverName || c.name.charAt(0).toUpperCase() + c.name.slice(1)
 
 export type ConnState = 'disconnected' | 'connecting' | 'authenticating' | 'connected' | 'reconnecting'
 
@@ -72,6 +77,16 @@ class AngelClient {
   conversations = $state<ConversationInfo[]>([])
   // False until the server has answered conv:list, so the UI can tell "none yet" from "not loaded".
   conversationsLoaded = $state(false)
+  connectors = $state<ConnectorInfo[]>([])
+  connectorsLoaded = $state(false)
+  // The last connector error from Settings, with the connector it was about (if any).
+  connectorError = $state<{ id?: string; message: string } | null>(null)
+  // True between asking to add a connector and the server's answer.
+  addingConnector = $state(false)
+  // A sign-in link the browser wouldn't open as a popup, shown as a link instead.
+  signInLink = $state<{ id: string; url: string } | null>(null)
+  #signInWindow: Window | null = null
+  #afterAdd: ((id: string | null) => void) | null = null
 
   #ws: WebSocket | null = null
   #docListeners = new Set<DocListener>()
@@ -181,6 +196,40 @@ class AngelClient {
   updateSettings(model: string, reasoningEffort: string | null) {
     this.settingsError = null
     this.send({ type: 'settings:set', model, reasoningEffort })
+  }
+
+  // Connectors (MCP servers). The server answers every change with the full list.
+  addConnector(url: string, token?: string, then?: (id: string | null) => void) {
+    this.connectorError = null
+    this.addingConnector = true
+    this.#afterAdd = then ?? null
+    this.send({ type: 'connector:add', url, token: token || undefined })
+  }
+
+  removeConnector(id: string) {
+    this.connectorError = null
+    this.send({ type: 'connector:remove', id })
+  }
+
+  reloadConnector(id: string) {
+    this.connectorError = null
+    this.send({ type: 'connector:reload', id })
+  }
+
+  // Call from a click: the window has to open in the gesture or the browser
+  // blocks it, so it opens blank and gets the link when the server sends it.
+  signInConnector(id: string) {
+    this.connectorError = null
+    this.signInLink = null
+    this.#signInWindow = window.open('', '_blank')
+    this.send({ type: 'connector:sign-in', id })
+  }
+
+  #openSignIn(id: string, url: string) {
+    const w = this.#signInWindow
+    this.#signInWindow = null
+    if (w && !w.closed) w.location.href = url
+    else this.signInLink = { id, url }
   }
 
   // A stored document resolved server-side (its real id is now known).
@@ -319,6 +368,7 @@ class AngelClient {
           this.send({ type: 'conv:load', conversationId: msg.agent.conversationId })
         }
         this.send({ type: 'conv:list' })
+        this.send({ type: 'connectors:list' })
         break
       }
 
@@ -495,6 +545,34 @@ class AngelClient {
         for (const fn of this.#docListeners) {
           try { fn({ conversationId: msg.conversationId, clientDocId: msg.clientDocId, error: msg.message }) } catch {}
         }
+        break
+
+      case 'connectors': {
+        const known = new Set(this.connectors.map(c => c.id))
+        this.connectors = msg.connectors
+        this.connectorsLoaded = true
+        if (this.addingConnector) {
+          this.addingConnector = false
+          const added = msg.connectors.find(c => !known.has(c.id))
+          this.#afterAdd?.(added?.id ?? null)
+          this.#afterAdd = null
+        }
+        // Signed in elsewhere (or by the popup): the link is spent.
+        if (this.signInLink && msg.connectors.find(c => c.id === this.signInLink!.id)?.status === 'connected') this.signInLink = null
+        break
+      }
+
+      case 'connector:sign-in':
+        // Asked for from a click (a window is waiting), or after adding one that
+        // needs it, where the person taps Sign in on its page.
+        if (this.#signInWindow) this.#openSignIn(msg.id, msg.url)
+        else this.signInLink = { id: msg.id, url: msg.url }
+        break
+
+      case 'connector:error':
+        this.connectorError = { id: msg.id, message: msg.message }
+        this.#signInWindow?.close()
+        this.#signInWindow = null
         break
 
       case 'account:reset:done':

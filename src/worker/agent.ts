@@ -5,6 +5,7 @@ import { effectiveVoice } from './voice'
 import { getToolDefinitions, executeTool, toolDoneLabel, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble, buildPerMessageReminder } from './lists'
+import { buildConnectorsPreamble } from './connectors'
 import { loadConversationContext, verbatimTurns, type SideInfo } from './conversation-context'
 import { DsmlStreamFilter, parseDsml } from './dsml'
 
@@ -91,6 +92,8 @@ async function buildSystemPrompt(env: Env, agentId: string, agentName: string, s
   if (side) parts.push(sidePreamble(side, person))
   const lists = await buildListsPreamble(env, agentId)
   if (lists) parts.push(lists)
+  const connectors = await buildConnectorsPreamble(env)
+  if (connectors) parts.push(connectors)
   return parts.join('\n\n')
 }
 
