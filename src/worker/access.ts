@@ -11,7 +11,6 @@ export interface Caller {
   sub: string
   email: string
   name: string
-  owner: boolean
 }
 
 // The browser can't set headers on a WebSocket, so the token rides the
@@ -42,11 +41,11 @@ export async function identify(env: Env, request: Request): Promise<Caller | nul
   // Dev bypass, locked twice: a local host AND DEV_AUTH=allow (.dev.vars only,
   // never a deployed secret).
   if (env.DEV_AUTH === 'allow' && new URL(request.url).hostname === 'localhost') {
-    return { sub: 'dev-user', email: 'dev@localhost', name: 'Dev', owner: isOwner(env, 'dev@localhost') }
+    return { sub: 'dev-user', email: 'dev@localhost', name: 'Dev' }
   }
   const token = tokenOf(request)
   if (!token) return null
   const claims = await verifyLoginToken(token, { audience: AUDIENCE })
   if (!claims?.email_verified) return null
-  return { sub: claims.sub, email: claims.email, name: claims.name, owner: isOwner(env, claims.email) }
+  return { sub: claims.sub, email: claims.email, name: claims.name }
 }

@@ -150,7 +150,27 @@ class AngelClient {
     return this.convStates[id]
   }
 
-  updateSettings(model: string | null, reasoningEffort: string | null) {
+  // Run the last message again after a failed reply.
+  retry(conversationId: string) {
+    const state = this.getConvState(conversationId)
+    state.error = null
+    state.streamState = 'streaming'
+    state.streamParts = []
+    state.streamSeq = 0
+    state.streamStartTime = Date.now()
+    this.send({ type: 'retry', conversationId })
+  }
+
+  dismissError(conversationId: string) {
+    this.getConvState(conversationId).error = null
+  }
+
+  // Erase everything this account owns on the server and start fresh.
+  resetAccount() {
+    this.send({ type: 'account:reset' })
+  }
+
+  updateSettings(model: string, reasoningEffort: string | null) {
     this.settingsError = null
     this.send({ type: 'settings:set', model, reasoningEffort })
   }
@@ -310,6 +330,7 @@ class AngelClient {
       case 'conv:messages': {
         const state = this.getConvState(msg.conversationId)
         state.messages = msg.messages
+        state.error = msg.error ?? null
         this.#loadedConversations.add(msg.conversationId)
         if (msg.stream) {
           state.streamState = 'streaming'
@@ -455,15 +476,18 @@ class AngelClient {
         }
         break
 
+      case 'account:reset:done':
+        location.reload()
+        break
+
       case 'error': {
+        // The server kept whatever text the reply got out; the error itself is
+        // not part of the conversation. It stays up until the next send or retry.
         const state = this.getConvState(msg.conversationId)
-        const parts: StreamPart[] = [...state.streamParts]
-        const text = parts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
-        if (parts.length > 0) {
-          parts.push({ type: 'text', content: `\n\n*Error: ${msg.message}*` })
+        const text = state.streamParts.filter(p => p.type === 'text').map(p => (p as { content: string }).content).join('')
+        if (text.trim()) {
           state.messages = [...state.messages, localMessage(
-            msg.conversationId, 'assistant', text + `\n\n*Error: ${msg.message}*`,
-            { parts: JSON.stringify(parts) },
+            msg.conversationId, 'assistant', text, { parts: JSON.stringify(state.streamParts) },
           )]
         }
         state.streamState = 'idle'
@@ -471,9 +495,6 @@ class AngelClient {
         state.streamSeq = 0
         state.streamStartTime = 0
         state.error = msg.message
-        setTimeout(() => {
-          if (state.error === msg.message) state.error = null
-        }, 8000)
         break
       }
     }

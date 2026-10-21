@@ -1,11 +1,10 @@
 // The models offered in the settings screen, plus their per-token price -
 // shown next to each option so a choice is never a guess. Pulled from
 // OpenRouter's /api/v1/models; prices are USD per 1M tokens and drift over
-// time, so they're a snapshot, not a live quote. `null` model = use the
-// DEEPSEEK_MODEL secret / code default (see llm.ts getModel()).
+// time, so they're a snapshot, not a live quote.
 //
 // This is the server-side allowlist too: settings:set only accepts a model
-// id that appears here (or null), never an arbitrary client-supplied string.
+// id that appears here, never an arbitrary client-supplied string.
 
 export interface ModelOption {
   id: string
@@ -17,30 +16,31 @@ export interface ModelOption {
 }
 
 export const MODEL_CATALOG: ModelOption[] = [
-  { id: 'deepseek/deepseek-v4.1-flash-1017', label: 'DeepSeek V4.1 Flash (1017)', tier: 'flash', reasoning: true, priceInPerM: 0.15, priceOutPerM: 0.60 },
-  { id: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.05, priceOutPerM: 0.38 },
-  { id: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash (0731)', tier: 'flash', reasoning: true, priceInPerM: 0.44, priceOutPerM: 1.32 },
-  { id: 'deepseek/deepseek-v4-pro-0813', label: 'DeepSeek V4 Pro (0813)', tier: 'flagship', reasoning: true, priceInPerM: 0.66, priceOutPerM: 1.98 },
-  { id: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5', tier: 'flash', reasoning: true, priceInPerM: 0.10, priceOutPerM: 0.50 },
-  { id: 'openai/gpt-6-luna', label: 'GPT-6 Luna', tier: 'flash', reasoning: true, priceInPerM: 0.10, priceOutPerM: 0.50 },
-  { id: 'xiaomi/mimo-v2.6-pro', label: 'MiMo V2.6 Pro', tier: 'flagship', reasoning: true, priceInPerM: 0.44, priceOutPerM: 0.87 },
-  { id: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.04, priceOutPerM: 0.12 },
-  { id: 'inception/mercury-3', label: 'Mercury 3', tier: 'flash', reasoning: true, priceInPerM: 0.10, priceOutPerM: 0.35 },
-  { id: 'inclusionai/ling-3.1-flash', label: 'Ling 3.1 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.08, priceOutPerM: 0.23 },
-  { id: 'qwen/qwen3.8-max-prime', label: 'Qwen3.8 Max Prime', tier: 'flagship', reasoning: true, priceInPerM: 4.00, priceOutPerM: 12.00 },
-  { id: 'qwen/qwen3.8-max-0902', label: 'Qwen3.8 Max', tier: 'flagship', reasoning: true, priceInPerM: 2.00, priceOutPerM: 6.00 },
+  { id: 'deepseek/deepseek-v4.1-flash-1017', label: 'DeepSeek V4.1 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.15, priceOutPerM: 0.60 },
   { id: 'qwen/qwen3.8-flash', label: 'Qwen3.8 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.15, priceOutPerM: 0.47 },
-  { id: 'qwen/qwen3.8-27b', label: 'Qwen3.8 27B', tier: 'flash', reasoning: true, priceInPerM: 0.04, priceOutPerM: 1.35 },
-  { id: 'qwen/qwen3.7-flash', label: 'Qwen3.7 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.03, priceOutPerM: 0.13 },
+  { id: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5', tier: 'flash', reasoning: true, priceInPerM: 0.10, priceOutPerM: 0.50 },
 ]
+
+// Hand-picked, not a leaderboard: the latest flash model from DeepSeek and from
+// Qwen, and Haiku, which makes a good companion. Used until someone picks a model, and for anyone whose saved model has since
+// left the catalog. A constant in code, not server config: there is no env knob.
+export const DEFAULT_MODEL = MODEL_CATALOG[0]!.id
+
+// The model a request actually runs on.
+export function resolveModel(saved: string | null | undefined): string {
+  return saved && isKnownModel(saved) ? saved : DEFAULT_MODEL
+}
+
+export function modelLabel(id: string): string {
+  return MODEL_CATALOG.find(m => m.id === id)?.label ?? id
+}
 
 export function isKnownModel(id: string): boolean {
   return MODEL_CATALOG.some(m => m.id === id)
 }
 
 export function modelSupportsReasoning(id: string | null | undefined): boolean {
-  if (!id) return true // the default (DeepSeek) supports it
-  return MODEL_CATALOG.find(m => m.id === id)?.reasoning ?? false
+  return MODEL_CATALOG.find(m => m.id === resolveModel(id))?.reasoning ?? false
 }
 
 export const REASONING_EFFORTS = ['low', 'medium', 'high'] as const

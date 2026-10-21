@@ -7,6 +7,7 @@
   import Toast from '$shared/ui/Toast.svelte'
   import ResetButton from '$shared/ui/ResetButton.svelte'
   import InstallBanner from '$shared/ui/InstallBanner.svelte'
+  import Icon from '$shared/ui/Icon.svelte'
   import LoginScreen from '$shared/ui/LoginScreen.svelte'
   import Chat from './pages/Chat.svelte'
   import Settings from './pages/Settings.svelte'
@@ -31,8 +32,15 @@
   const entries = $derived([
     { label: agentName, hash: '/chat', current: route.view === 'chat' },
     ...sides.map(s => ({ label: s.title || 'Side chat', hash: `/side/${s.id}`, current: route.view === 'side' && route.id === s.id })),
-    { label: 'Settings', hash: '/settings', current: route.view === 'settings' },
   ])
+
+  const who = $derived(angel.user?.name || angel.user?.email || (angel.devSession ? 'Dev session' : ''))
+  const whoEmail = $derived(angel.user?.name ? angel.user.email : '')
+  const initial = $derived((who[0] || '?').toUpperCase())
+  function openSettings() {
+    menuOpen = false
+    location.hash = '/settings'
+  }
 
   async function newSideChat() {
     menuOpen = false
@@ -95,10 +103,6 @@
         <span class="footer-icon">&#65291;</span>
         <span>New side chat</span>
       </button>
-      <button class="footer-btn" onclick={toggleDark}>
-        <span class="footer-icon">{dark ? '\u2600' : '\u263A'}</span>
-        <span>{dark ? 'Light mode' : 'Dark mode'}</span>
-      </button>
       <button class="footer-btn" onclick={() => angel.signOut()}>
         <span class="footer-icon">&#9099;</span>
         <span>Sign out</span>
@@ -107,6 +111,25 @@
         <span>Version {__BUILD__}</span>
         <ResetButton tabindex={menuOpen ? 0 : -1} />
       </p>
+      <div class="account">
+        <div class="who">
+          {#if angel.user?.picture}
+            <img class="avatar" src={angel.user.picture} alt="" referrerpolicy="no-referrer" />
+          {:else}
+            <span class="avatar initial" aria-hidden="true">{initial}</span>
+          {/if}
+          <span class="who-text">
+            <span class="who-name">{who}</span>
+            {#if whoEmail}<span class="who-email">{whoEmail}</span>{/if}
+          </span>
+        </div>
+        <button class="icon-btn" onclick={toggleDark} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'}>
+          <Icon name={dark ? 'light_mode' : 'dark_mode'} size={20} />
+        </button>
+        <button class="icon-btn" class:current={route.view === 'settings'} onclick={openSettings} aria-label="Settings" title="Settings">
+          <Icon name="settings" size={20} />
+        </button>
+      </div>
     {/snippet}
   </Drawer>
 {/if}
@@ -157,7 +180,7 @@
     color: var(--text-primary);
     text-align: left;
   }
-  .footer-btn:hover { color: var(--accent); }
+  .footer-btn:hover { color: var(--accent-text); }
   .footer-icon { width: 1.2em; text-align: center; }
 
   .build {
@@ -169,4 +192,44 @@
     margin-top: 8px;
   }
   .build span { opacity: 0.6; }
+
+  .account {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .avatar.initial {
+    display: grid;
+    place-items: center;
+    background: var(--accent-deep);
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+  .who-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+  .who-name, .who-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who-name { font-size: 0.85rem; color: var(--text-primary); }
+  .who-email { font-size: 0.72rem; color: var(--text-secondary); }
+  .icon-btn {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    color: var(--text-secondary);
+  }
+  .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+  .icon-btn.current { color: var(--accent-text); }
 </style>

@@ -1,5 +1,5 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, ServerMsg } from './types'
-import { chatCompletionStream, getModel } from './llm'
+import { chatCompletionStream, getModel, LlmError } from './llm'
 import { getToolDefinitions, executeTool, toolDoneLabel, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble, buildPerMessageReminder } from './lists'
@@ -10,8 +10,8 @@ const MAX_TOOL_ROUNDS = 200
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
-function isDeepSeek(env: Env, agentModel?: string | null): boolean {
-  return getModel(env, agentModel).toLowerCase().includes('deepseek')
+function isDeepSeek(agentModel?: string | null): boolean {
+  return getModel(agentModel).toLowerCase().includes('deepseek')
 }
 
 
@@ -95,7 +95,7 @@ const dateLine = (ts: string | null): string => (ts ? ts.slice(0, 10) : '')
 // ---- Response pass (hot path, streaming) ----
 export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGenerator<AgentEvent> {
   const { env, conversationId, agentId, agentName, agentModel, agentReasoningEffort } = ctx
-  const modelId = getModel(env, agentModel)
+  const modelId = getModel(agentModel)
 
   const { recap, verbatim, total, side } = await loadConversationContext(env, agentId, conversationId)
   const system = await buildSystemPrompt(env, agentId, agentName, side)
@@ -123,13 +123,14 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
     let sawAnyToolCall = false
     let truncated = false
     let finishReason: string | null = null
-    const dsmlFilter = isDeepSeek(env, agentModel) ? new DsmlStreamFilter() : null
+    const dsmlFilter = isDeepSeek(agentModel) ? new DsmlStreamFilter() : null
     // A dropped stream throws (see llm.ts). Retry the round from scratch,
     // telling the client to discard the truncated partial first. The provider's
     // bad moments last seconds, so back off between tries (and give it more tries)
     // rather than burning them all back-to-back into the same rough window. The
     // reset the client receives on each retry is its cue that Angel is still going.
     const STREAM_ATTEMPTS = 6
+    let retryAfterMs = 0
     for (let attempt = 0; attempt < STREAM_ATTEMPTS; attempt++) {
       if (attempt > 0) {
         yield { type: 'reset' }
@@ -137,7 +138,7 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
         acc.reset()
         sawAnyToolCall = false
         finishReason = null
-        await sleep(Math.min(600 * 2 ** (attempt - 1), 5000)) // 0.6s, 1.2s, 2.4s, 4.8s, 5s
+        await sleep(Math.max(retryAfterMs, Math.min(600 * 2 ** (attempt - 1), 5000))) // 0.6s, 1.2s, 2.4s, 4.8s, 5s, or the provider's Retry-After
       }
       try {
         for await (const chunk of chatCompletionStream(env, messages, { tools, model: modelId, reasoningEffort: agentReasoningEffort })) {
@@ -171,6 +172,9 @@ export async function* runAgent(ctx: AgentContext, userMessage: string): AsyncGe
       } catch (e) {
         console.error(`[runAgent] stream attempt ${attempt + 1}/${STREAM_ATTEMPTS} failed:`, e instanceof Error ? e.message : e)
         truncated = true
+        // A bad key, no credit, or a refused request won't get better in 5 seconds.
+        if (e instanceof LlmError && !e.retryable) throw e
+        retryAfterMs = e instanceof LlmError ? (e.retryAfterMs ?? 0) : 0
         if (attempt === STREAM_ATTEMPTS - 1) {
           if (assistantText.length > 0 || sawAnyToolCall) break // keep best effort
           throw e
@@ -243,7 +247,7 @@ function isParseableArgs(s: string): boolean {
 
 export async function runMemoryPass(ctx: AgentContext): Promise<void> {
   const { env, conversationId, agentId, agentName, agentModel } = ctx
-  const modelId = getModel(env, agentModel)
+  const modelId = getModel(agentModel)
 
   const { recap, verbatim, side } = await loadConversationContext(env, agentId, conversationId)
   const system = await buildSystemPrompt(env, agentId, agentName, side)
@@ -276,7 +280,7 @@ export async function runMemoryPass(ctx: AgentContext): Promise<void> {
     } catch (e) {
       console.error('[runMemoryPass] stream failed:', e instanceof Error ? e.message : e)
     }
-    if (isDeepSeek(env, agentModel)) {
+    if (isDeepSeek(agentModel)) {
       const parsed = parseDsml(text)
       if (parsed) {
         text = parsed.cleanText

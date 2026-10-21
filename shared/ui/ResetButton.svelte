@@ -45,7 +45,7 @@
     transition: color 0.15s, opacity 0.15s;
   }
   .reset-btn:hover { color: var(--accent-deep, var(--accent)); opacity: 1; }
-  .pending { color: var(--accent); opacity: 1; }
+  .pending { color: var(--accent-text); opacity: 1; }
   .pending:hover { color: var(--accent-deep, var(--accent)); }
   .busy svg { animation: spin 0.9s linear infinite; }
   @keyframes spin {

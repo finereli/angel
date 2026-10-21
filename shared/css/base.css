@@ -10,6 +10,7 @@
   --accent: #6366f1;
   --accent-deep: #4f46e5;
   --accent-light: #a5b4fc;
+  --accent-text: var(--accent-deep); /* accent as TEXT: deep on light, light on dark (see dark block) */
   --accent-soft: #eef2ff;      /* tinted surface for selected/current rows */
 
   /* neutrals */
@@ -56,6 +57,7 @@
   --text-primary: #cdd6f4;
   --text-secondary: #a6adc8;
   --ok: #a6e3a1;
+  --accent-text: var(--accent-light);
   --danger: #f38ba8;
   --danger-deep: #e64553;
 }
@@ -84,7 +86,7 @@ button {
   cursor: pointer;
   touch-action: manipulation;
 }
-a { color: var(--accent); }
+a { color: var(--accent-text); }
 h1, h2, h3 { font-weight: 500; line-height: 1.25; }
 img { max-width: 100%; }
 

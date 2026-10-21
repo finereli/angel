@@ -11,7 +11,6 @@ export interface Env {
   OWNER_EMAIL: string
   ALLOWED_EMAILS?: string
   DEV_AUTH?: string
-  DEEPSEEK_MODEL?: string
 }
 
 // DB row types
@@ -198,7 +197,9 @@ export type ClientMsg =
   | { type: 'chat'; conversationId: string; clientMsgId: string; content: string }
   | { type: 'doc:add'; conversationId: string; clientDocId: string; title: string; content: string }
   | { type: 'stop'; conversationId: string }
-  | { type: 'settings:set'; model: string | null; reasoningEffort: string | null }
+  | { type: 'settings:set'; model: string; reasoningEffort: string | null }
+  | { type: 'retry'; conversationId: string }
+  | { type: 'account:reset' }
 
 export type ServerMsg =
   | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agent: AgentInfo | null; pendingTurns: string[] }
@@ -206,7 +207,8 @@ export type ServerMsg =
   | { type: 'pong'; ts: number }
   | { type: 'conv:list'; conversations: ConversationInfo[] }
   | { type: 'conv:created'; conversation: ConversationInfo }
-  | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot; pending?: boolean }
+  | { type: 'conv:messages'; conversationId: string; messages: MessageRow[]; stream?: StreamSnapshot; pending?: boolean; error?: string }
+  | { type: 'account:reset:done' }
   | { type: 'msg:user'; conversationId: string; clientMsgId: string; messageId: number; content: string }
   | { type: 'text'; conversationId: string; seq: number; content: string }
   | { type: 'tool_start'; conversationId: string; seq: number; id: string; name: string; label: string }

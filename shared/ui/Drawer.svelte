@@ -117,7 +117,7 @@
   .section-label {
     font-size: 0.7rem;
     font-weight: 600;
-    color: var(--accent);
+    color: var(--accent-text);
     letter-spacing: 0.05em;
     padding: 4px 14px 2px;
   }
@@ -141,13 +141,13 @@
   ul button:hover { background: var(--bg-hover); }
   ul button.current {
     background: var(--bg-hover);
-    color: var(--accent-deep);
+    color: var(--accent-text);
     font-weight: 500;
   }
   .count {
     font-size: 0.7rem;
     font-weight: 600;
-    color: var(--accent);
+    color: var(--accent-text);
     background: var(--accent-soft, var(--bg-hover));
     padding: 1px 7px;
     border-radius: 99px;

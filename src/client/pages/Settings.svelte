@@ -1,21 +1,27 @@
 <script lang="ts">
   import { angel } from '../lib/streamManager.svelte'
-  import { MODEL_CATALOG, REASONING_EFFORTS, modelSupportsReasoning, type ModelOption } from '../../worker/models'
+  import { MODEL_CATALOG, REASONING_EFFORTS, modelSupportsReasoning, resolveModel } from '../../worker/models'
 
-  const selectedModel = $derived(angel.agent?.model ?? null)
+  const selectedModel = $derived(resolveModel(angel.agent?.model))
   const selectedEffort = $derived(angel.agent?.reasoningEffort ?? null)
   const reasoningSupported = $derived(modelSupportsReasoning(selectedModel))
 
-  function pricePerM(m: ModelOption): string {
-    return `$${m.priceInPerM.toFixed(2)} in / $${m.priceOutPerM.toFixed(2)} out per 1M tokens`
-  }
+  const price = (n: number) => `$${n.toFixed(2)}`
 
-  function chooseModel(id: string | null) {
+  function chooseModel(id: string) {
     angel.updateSettings(id, modelSupportsReasoning(id) ? selectedEffort : null)
   }
 
   function chooseEffort(effort: string | null) {
     angel.updateSettings(selectedModel, effort)
+  }
+
+  // Two taps, so wiping everything is never one stray press.
+  let confirmingReset = $state(false)
+  let resetting = $state(false)
+  function resetAccount() {
+    resetting = true
+    angel.resetAccount()
   }
 </script>
 
@@ -28,25 +34,17 @@
 
   <section>
     <h3>Model</h3>
-    <p class="hint">Which model {angel.agent?.name || 'Angel'} thinks with. Prices are per 1M tokens, input/output.</p>
-
-    <label class="option">
-      <input type="radio" name="model" checked={selectedModel === null} onchange={() => chooseModel(null)} />
-      <span class="option-body">
-        <span class="option-label">Default</span>
-        <span class="option-price">Server-configured fallback</span>
-      </span>
-    </label>
-
-    {#each MODEL_CATALOG as m (m.id)}
-      <label class="option">
-        <input type="radio" name="model" checked={selectedModel === m.id} onchange={() => chooseModel(m.id)} />
-        <span class="option-body">
-          <span class="option-label">{m.label} <span class="tier">{m.tier}</span></span>
-          <span class="option-price">{pricePerM(m)}</span>
-        </span>
-      </label>
-    {/each}
+    <p class="hint">Which model {angel.agent?.name || 'Angel'} thinks with. Prices are per 1M tokens, input / output.</p>
+    <select
+      class="select"
+      aria-label="Model"
+      value={selectedModel}
+      onchange={(e) => chooseModel(e.currentTarget.value)}
+    >
+      {#each MODEL_CATALOG as m (m.id)}
+        <option value={m.id}>{m.label} - {price(m.priceInPerM)} / {price(m.priceOutPerM)}</option>
+      {/each}
+    </select>
   </section>
 
   <section>
@@ -67,6 +65,20 @@
       </div>
     {:else}
       <p class="hint">The selected model doesn't support a reasoning effort setting.</p>
+    {/if}
+  </section>
+
+  <section>
+    <h3>Your data</h3>
+    <p class="hint">Everything {angel.agent?.name || 'Angel'} remembers about you - the conversation, memory, lists, documents and wake-ups - is stored under your account. Deleting it can't be undone.</p>
+    {#if !confirmingReset}
+      <button class="danger-btn" onclick={() => (confirmingReset = true)}>Delete all my data</button>
+    {:else}
+      <p class="hint warn">This erases the whole conversation and everything remembered. Sure?</p>
+      <div class="confirm-row">
+        <button class="danger-btn solid" disabled={resetting} onclick={resetAccount}>{resetting ? 'Deleting...' : 'Yes, delete everything'}</button>
+        <button class="quiet-btn" disabled={resetting} onclick={() => (confirmingReset = false)}>Cancel</button>
+      </div>
     {/if}
   </section>
 </div>
@@ -113,27 +125,31 @@
   }
   .option:hover { background: var(--bg-hover); }
   .option input { flex-shrink: 0; accent-color: var(--accent); }
-  .option-body {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-  .option-label {
-    font-size: 0.9rem;
+  .select {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+    background: var(--bg-input);
     color: var(--text-primary);
+    font: inherit;
+    font-size: 0.9rem;
   }
-  .tier {
-    font-size: 0.72rem;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    margin-left: 6px;
+  .select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint.warn { color: var(--danger); }
+  .confirm-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .danger-btn, .quiet-btn {
+    padding: 9px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    font-size: 0.85rem;
   }
-  .option-price {
-    font-size: 0.78rem;
-    color: var(--text-secondary);
-  }
+  .danger-btn:hover { background: #ef444422; }
+  .danger-btn.solid { background: var(--danger); color: #fff; }
+  .danger-btn:disabled, .quiet-btn:disabled { opacity: 0.6; }
+  .quiet-btn { border-color: var(--text-secondary); color: var(--text-secondary); }
+  .quiet-btn:hover { background: var(--bg-hover); }
   .effort-row {
     display: flex;
     flex-wrap: wrap;

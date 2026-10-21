@@ -326,7 +326,11 @@
     <div class="banner warn">Reconnecting...</div>
   {/if}
   {#if conv?.error}
-    <div class="banner error">{conv.error}</div>
+    <div class="banner error" role="alert">
+      <span class="banner-text">{conv.error}</span>
+      <button class="banner-btn" onclick={() => angel.retry(conversationId)}>Try again</button>
+      <button class="banner-btn quiet" aria-label="Dismiss" onclick={() => angel.dismissError(conversationId)}>Dismiss</button>
+    </div>
   {/if}
 
   <div class="messages" bind:this={messagesEl} onscroll={handleScroll}>
@@ -517,9 +521,27 @@
     color: #d97706;
   }
   .banner.error {
+    padding: 10px 16px;
+    font-size: 0.85rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 4px 12px;
     background: #ef444422;
-    color: #ef4444;
+    color: var(--danger);
+    text-align: start;
   }
+  .banner-text { flex: 1 1 18rem; }
+  .banner-btn {
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    color: inherit;
+    font-size: 0.78rem;
+  }
+  .banner-btn:hover { background: #ef444422; }
+  .banner-btn.quiet { border-color: transparent; opacity: 0.8; }
 
   .messages {
     flex: 1;
@@ -617,7 +639,7 @@
   }
 
   .tool-row.active {
-    color: var(--accent);
+    color: var(--accent-text);
   }
   .tool-row.waiting {
     color: var(--text-secondary);
@@ -772,7 +794,7 @@
      names how much there is to read rather than previewing it. */
   .doc-chip {
     background: var(--accent-soft);
-    color: var(--accent-deep);
+    color: var(--accent-text);
     border-color: var(--accent);
   }
   .doc-pending-row {
@@ -806,7 +828,7 @@
     transition: color 0.15s, background 0.15s;
   }
   .attach-btn:not(:disabled):hover {
-    color: var(--accent);
+    color: var(--accent-text);
     background: var(--bg-code);
   }
   .attach-btn:disabled {

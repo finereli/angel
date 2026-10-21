@@ -7,9 +7,9 @@ import { storeDocument, normalizeContent } from './documents'
 import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
 import { getConversation, conversationInfo, renderSeedText } from './conversation-context'
-import { isKnownModel, isReasoningEffort } from './models'
+import { isKnownModel, isReasoningEffort, resolveModel } from './models'
+import { friendlyError, LlmError } from './llm'
 import { userDb, migrate } from './user-db'
-import { importLegacy } from './legacy-import'
 import { runCadenceTool } from './cadence-tools'
 import { WS_PROTOCOL } from './access'
 
@@ -43,8 +43,6 @@ export class AngelDO implements DurableObject {
   private state: DurableObjectState
   // Env as the rest of the worker sees it: DB is this user's private SQLite.
   private env: Env
-  // The real env, for the one thing that still reads shared D1 (legacy import).
-  private sharedEnv: Env
   private initialized: Promise<void> | null = null
   private activeStreams = new Map<string, ActiveStream>()
   // Responses stream one at a time (one linear stream); memory work runs on its
@@ -62,7 +60,6 @@ export class AngelDO implements DurableObject {
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
-    this.sharedEnv = env
     const sql = state.storage.sql
     const transact = <T>(fn: () => T) => state.storage.transactionSync(fn)
     migrate(sql, transact)
@@ -84,7 +81,7 @@ export class AngelDO implements DurableObject {
       // Set by the worker after it verified the token; never from the client.
       const sub = request.headers.get('X-Angel-Sub')
       if (!sub) return new Response('Unauthorized', { status: 401 })
-      await this.init(sub, request.headers.get('X-Angel-Owner') === '1')
+      await this.init(sub)
 
       const pair = new WebSocketPair()
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
@@ -190,6 +187,14 @@ export class AngelDO implements DurableObject {
       case 'settings:set':
         await this.handleSettingsSet(ws, msg.model, msg.reasoningEffort)
         break
+
+      case 'retry':
+        await this.handleRetry(msg.conversationId)
+        break
+
+      case 'account:reset':
+        await this.handleAccountReset()
+        break
     }
   }
 
@@ -201,22 +206,10 @@ export class AngelDO implements DurableObject {
     ws.close(1011, 'WebSocket error')
   }
 
-  // First contact for a user: remember who this DO is, and for the owner pull in
-  // the pre-multi-user data from D1. Memoised per instance; a failed import
-  // clears the memo so the next connect resumes it.
-  private init(sub: string, owner: boolean): Promise<void> {
+  // First contact for a user: remember who this DO is. Memoised per instance.
+  private init(sub: string): Promise<void> {
     this.initialized ??= (async () => {
       if ((await this.state.storage.get('sub')) !== sub) await this.state.storage.put('sub', sub)
-      if (owner && !(await this.state.storage.get('legacy_imported'))) {
-        const sql = this.state.storage.sql
-        await importLegacy(
-          this.sharedEnv.DB, sql, fn => this.state.storage.transactionSync(fn),
-          () => (this.state.storage.kv.get('legacy_import') as { done: string[]; wiped: boolean } | undefined) ?? null,
-          p => this.state.storage.kv.put('legacy_import', p),
-        )
-        await this.state.storage.put('legacy_imported', true)
-        await this.syncAlarm() // wake-ups that came across need their alarm
-      }
     })().catch(e => { this.initialized = null; throw e })
     return this.initialized
   }
@@ -261,8 +254,8 @@ export class AngelDO implements DurableObject {
     if (row) this.broadcast({ type: 'conv:created', conversation: conversationInfo(row) })
   }
 
-  private async handleSettingsSet(ws: WebSocket, model: string | null, reasoningEffort: string | null) {
-    if (model !== null && !isKnownModel(model)) {
+  private async handleSettingsSet(ws: WebSocket, model: string, reasoningEffort: string | null) {
+    if (!isKnownModel(model)) {
       this.send(ws, { type: 'settings:error', message: `Unknown model: ${model}` })
       return
     }
@@ -307,13 +300,46 @@ export class AngelDO implements DurableObject {
       ? { conversationId, seq: stream.seq, text: stream.text, tools: stream.tools, parts: stream.parts }
       : undefined
 
+    // The last reply failed and nothing has run since: the client shows why, with a retry.
+    const lastError = stream || this.pendingTurns.has(conversationId)
+      ? undefined
+      : await this.state.storage.get<string>(`error:${conversationId}`)
+
     this.send(ws, {
       type: 'conv:messages',
       conversationId,
       messages,
       stream: snapshot,
       pending: this.pendingTurns.has(conversationId) || undefined,
+      error: lastError,
     })
+  }
+
+  // Run the turn again for the last message, without saving it a second time.
+  private async handleRetry(conversationId: string) {
+    if (this.activeStreams.has(conversationId) || this.pendingTurns.has(conversationId)) return
+    const agent = await this.resolveAgent(conversationId)
+    if (!agent) return
+    const last = await this.env.DB.prepare(
+      `SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1`
+    ).bind(conversationId).first<{ role: string; content: string }>()
+    if (last?.role !== 'user') return
+    await this.runTurn(conversationId, agent.agentId, agent.agentName, agent.agentModel, agent.agentReasoningEffort, last.content)
+  }
+
+  // Wipe everything this user owns - messages, memory, lists, documents, the
+  // wake-up alarm - and start over from the seeded schema. The account itself
+  // (sign-in, allow-list) is untouched.
+  private async handleAccountReset() {
+    for (const s of this.activeStreams.values()) s.aborted = true
+    const sub = await this.state.storage.get<string>('sub')
+    await this.state.storage.deleteAlarm()
+    await this.state.storage.deleteAll()
+    migrate(this.state.storage.sql, fn => this.state.storage.transactionSync(fn))
+    if (sub) await this.state.storage.put('sub', sub)
+    this.processedClientMsgs.clear()
+    this.pendingTurns.clear()
+    this.broadcast({ type: 'account:reset:done' })
   }
 
   private async handleChat(conversationId: string, clientMsgId: string, content: string) {
@@ -401,6 +427,7 @@ export class AngelDO implements DurableObject {
     }
     this.activeStreams.set(conversationId, stream)
     await this.state.storage.put(`streaming:${conversationId}`, agentId)
+    await this.state.storage.delete(`error:${conversationId}`)
     let sawDone = false
     this.log('info', 'stream:start', `agent=${agentName}`, agentId, conversationId)
 
@@ -484,6 +511,7 @@ export class AngelDO implements DurableObject {
             this.broadcast({ type: 'done', conversationId, seq: stream.seq, usage: event.usage })
             break
           case 'error':
+            await this.state.storage.put(`error:${conversationId}`, event.message)
             this.broadcast({ type: 'error', conversationId, seq: stream.seq, message: event.message })
             break
         }
@@ -503,14 +531,18 @@ export class AngelDO implements DurableObject {
         this.broadcast({ type: 'done', conversationId, seq: stream.seq })
       }
     } catch (e) {
-      const errMsg = e instanceof Error ? e.message : 'Agent error'
-      this.log('error', 'stream:error', `err=${errMsg} textLen=${stream.text.length} savedMsgId=${stream.savedMsgId}`, agentId, conversationId)
+      // What the person sees is plain language; the provider's raw text goes to the log.
+      const errMsg = friendlyError(e, resolveModel(agentModel))
+      const raw = e instanceof LlmError ? e.detail : e instanceof Error ? e.message : String(e)
+      this.log('error', 'stream:error', `err=${raw} textLen=${stream.text.length} savedMsgId=${stream.savedMsgId}`, agentId, conversationId)
       stream.seq++
+      await this.state.storage.put(`error:${conversationId}`, errMsg)
       this.broadcast({ type: 'error', conversationId, seq: stream.seq, message: errMsg })
-      const hadText = stream.text.trim().length > 0
-      if (hadText) stream.parts.push({ type: 'text', content: `\n\n*(error: ${errMsg})*` })
-      const finalContent = hadText ? `${stream.text}\n\n*(error: ${errMsg})*` : `*Error: ${errMsg}*`
-      await this.saveAssistant(conversationId, finalContent, hadText ? completedParts(stream.parts) : undefined, undefined, stream.savedMsgId).catch(() => {})
+      // Keep whatever the reply managed to say, but never write the error into the
+      // stream: it would be fed back to the model as something Angel said.
+      if (stream.text.trim()) {
+        await this.saveAssistant(conversationId, stream.text, completedParts(stream.parts), undefined, stream.savedMsgId).catch(() => {})
+      }
     } finally {
       this.activeStreams.delete(conversationId)
       await this.state.storage.delete(`streaming:${conversationId}`)
