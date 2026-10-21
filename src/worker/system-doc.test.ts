@@ -13,7 +13,7 @@ describe('system doc', () => {
   it('describes the machine, not just a stub', () => {
     expect(doc.length).toBeGreaterThan(500)
     expect(doc).toContain('Durable Object')
-    expect(doc).toContain('D1')
+    expect(doc).toContain('SQLite')
     expect(doc).toContain('recall')
   })
 

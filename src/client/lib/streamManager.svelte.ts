@@ -173,6 +173,11 @@ class AngelClient {
     this.send({ type: 'account:reset' })
   }
 
+  // Set (or clear, with null) how Angel sounds. Lives in Settings on purpose.
+  setVoice(voice: string | null) {
+    this.send({ type: 'settings:voice', voice })
+  }
+
   updateSettings(model: string, reasoningEffort: string | null) {
     this.settingsError = null
     this.send({ type: 'settings:set', model, reasoningEffort })
@@ -218,7 +223,7 @@ class AngelClient {
     this.#ws.onopen = () => {
       this.#opened = true
       this.connState = 'authenticating'
-      this.send({ type: 'auth' })
+      this.send({ type: 'auth', tz: Intl.DateTimeFormat().resolvedOptions().timeZone })
     }
 
     this.#ws.onmessage = (event) => {

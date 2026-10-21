@@ -1,5 +1,6 @@
 // The stream pyramid: index-0 anchored, immutable tiles, logarithmic recency
 // compression of the one linear conversation stream. See docs/pyramid-spec.md §1.
+import { personName, speakerLabel } from './person'
 import type { Env, StreamSummaryRow } from './types'
 import { STREAM } from './config'
 import { chatCompletion } from './llm'
@@ -112,7 +113,7 @@ async function buildTier1Tile(env: Env, agentId: string, agentName: string, conv
   const pairs = await getPairsInRange(env, conversationId, start, end)
   if (pairs.length === 0) return
   const body = pairs.map(p =>
-    `Eli: ${p.userContent}\nMe: ${p.assistantContent}`
+    `${speakerLabel(env)}: ${p.userContent}\nMe: ${p.assistantContent}`
   ).join('\n\n')
   const text = await compressStream(env, agentName, body, 1)
   await insertTile(env, agentId, 1, start, end, text, pairs.length,
@@ -143,8 +144,8 @@ async function insertTile(
 // First-person compressor: Angel remembering, not a report. Spec §4.1.
 async function compressStream(env: Env, agentName: string, body: string, tier: number): Promise<string> {
   const system = tier === 1
-    ? `You are ${agentName}. Write a short recap of this stretch of conversation with Eli in your own voice, so you can remember it later. Say what you got into, what he was turning over, what shifted, where you left it. Write to Eli as "you" and to yourself as "I"; never refer to yourself in the third person. Warm and plain, not a report. A few sentences.`
-    : `You are ${agentName}. Combine these recaps of earlier conversation with Eli into one, in your own voice, dropping redundancy but keeping what mattered - decisions, turns, the texture. Write to Eli as "you" and to yourself as "I"; never third person. A short paragraph.`
+    ? `You are ${agentName}. Write a short recap of this stretch of conversation with ${personName(env)} in your own voice, so you can remember it later. Say what you got into, what they were turning over, what shifted, where you left it. Write to them as "you" and to yourself as "I"; never refer to yourself in the third person. Warm and plain, not a report. A few sentences.`
+    : `You are ${agentName}. Combine these recaps of earlier conversation with ${personName(env)} into one, in your own voice, dropping redundancy but keeping what mattered - decisions, turns, the texture. Write to them as "you" and to yourself as "I"; never third person. A short paragraph.`
   const result = await chatCompletion(env, [
     { role: 'system', content: system },
     { role: 'user', content: body },

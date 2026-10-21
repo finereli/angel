@@ -11,7 +11,7 @@ export const webTools: Tool[] = [
       type: 'function',
       function: {
         name: 'web_fetch',
-        description: 'Fetch a web page and return its content as Markdown. Use this when Eli shares a URL or when you need to read something from the web.',
+        description: 'Fetch a web page and return its content as Markdown. Use this when the person shares a URL or when you need to read something from the web.',
         parameters: {
           type: 'object',
           properties: {

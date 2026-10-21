@@ -6,16 +6,18 @@ export const utilTools: Tool[] = [
       type: 'function',
       function: {
         name: 'current_time',
-        description: 'Get the current date and time in UTC and Eli\'s local timezone.',
+        description: 'Get the current date and time in UTC and, when known, the person\'s local timezone.',
         parameters: { type: 'object', properties: {} },
       },
     },
     label: ['Checking time', 'Checked time'],
-    run: async () => {
+    run: async (ctx) => {
       const now = new Date()
       const utc = now.toISOString()
+      const tz = ctx.env.USER_TZ
+      if (!tz) return `UTC: ${utc}\n(Their timezone isn't known yet.)`
       const local = now.toLocaleString('en-US', {
-        timeZone: 'Asia/Jerusalem',
+        timeZone: tz,
         weekday: 'long',
         year: 'numeric',
         month: 'long',
@@ -25,7 +27,7 @@ export const utilTools: Tool[] = [
         second: '2-digit',
         hour12: true,
       })
-      return `UTC: ${utc}\nEli's local time (Israel): ${local}`
+      return `UTC: ${utc}\nTheir local time (${tz}): ${local}`
     },
   },
 ]

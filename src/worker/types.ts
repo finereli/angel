@@ -11,6 +11,9 @@ export interface Env {
   OWNER_EMAIL: string
   ALLOWED_EMAILS?: string
   DEV_AUTH?: string
+  // Set inside a user's DO only (see durable-object.ts): who they are and where.
+  USER_NAME?: string
+  USER_TZ?: string
 }
 
 // DB row types
@@ -186,10 +189,14 @@ export interface AgentInfo {
   conversationId: string
   model: string | null
   reasoningEffort: string | null
+  // How Angel sounds, set by the person in Settings (never by Angel in chat).
+  voice: string | null
+  // Whether there is any conversation yet, so Settings knows if a model change needs a warning.
+  hasHistory: boolean
 }
 
 export type ClientMsg =
-  | { type: 'auth' }
+  | { type: 'auth'; tz?: string }
   | { type: 'ping'; ts: number }
   | { type: 'conv:load'; conversationId: string }
   | { type: 'conv:list' }
@@ -200,6 +207,7 @@ export type ClientMsg =
   | { type: 'doc:add'; conversationId: string; clientDocId: string; title: string; content: string }
   | { type: 'stop'; conversationId: string }
   | { type: 'settings:set'; model: string; reasoningEffort: string | null }
+  | { type: 'settings:voice'; voice: string | null }
   | { type: 'retry'; conversationId: string }
   | { type: 'account:reset' }
 

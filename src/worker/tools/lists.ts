@@ -10,7 +10,7 @@ export const listTools: Tool[] = [
       type: 'function',
       function: {
         name: 'lists_catalog',
-        description: 'List all lists with their load modes and item counts.',
+        description: 'List all lists with their load modes and item counts. Two are yours to maintain and grow as you learn: instructions (how you operate) and memory-instructions (how you organize memory and what is worth keeping). Lists loaded as always are in your system prompt every turn.',
         parameters: { type: 'object', properties: {} },
       },
     },

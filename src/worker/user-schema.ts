@@ -231,4 +231,8 @@ ALTER TABLE conversations ADD COLUMN seed_at TEXT;
 
 CREATE INDEX idx_conversations_parent ON conversations(parent_id);
 `,
+`-- How the agent sounds. Set by the person in Settings, outside the chat: models
+-- resist changing their own personality when asked to mid-conversation.
+ALTER TABLE agents ADD COLUMN voice TEXT DEFAULT NULL;
+`,
 ]

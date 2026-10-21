@@ -1,5 +1,6 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, ServerMsg } from './types'
 import { chatCompletionStream, getModel, LlmError } from './llm'
+import { personName } from './person'
 import { getToolDefinitions, executeTool, toolDoneLabel, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble, buildPerMessageReminder } from './lists'
@@ -75,16 +76,18 @@ function parseToolArgs(tc: ToolCall): Record<string, unknown> {
 
 // Framing for a side conversation, so the agent knows which stream it is in:
 // main does not see this, and nothing here survives unless recorded.
-function sidePreamble(side: SideInfo): string {
+function sidePreamble(side: SideInfo, person: string): string {
   const when = side.seedAt ? `${side.seedAt.slice(0, 16).replace('T', ' ')} UTC` : 'an earlier point'
   const name = side.title ? ` called "${side.title}"` : ''
   return `# This is a side conversation
-You're in a side conversation${name}, branched off the main line at ${when}. Eli is here with you, off to the side. The main line does not see anything said here and will not remember it. Where the main line stood when you branched is in your history above. Anything worth keeping across the main line has to be recorded as an observation - otherwise it goes when this thread does.`
+You're in a side conversation${name}, branched off the main line at ${when}. ${person} is here with you, off to the side. The main line does not see anything said here and will not remember it. Where the main line stood when you branched is in your history above. Anything worth keeping across the main line has to be recorded as an observation - otherwise it goes when this thread does.`
 }
 
 async function buildSystemPrompt(env: Env, agentId: string, agentName: string, side: SideInfo | null = null): Promise<string> {
-  const parts = [buildOperatingNotes(agentName)]
-  if (side) parts.push(sidePreamble(side))
+  const row = await env.DB.prepare(`SELECT voice FROM agents WHERE id = ?`).bind(agentId).first<{ voice: string | null }>()
+  const person = personName(env)
+  const parts = [buildOperatingNotes(agentName, person, row?.voice)]
+  if (side) parts.push(sidePreamble(side, person))
   const lists = await buildListsPreamble(env, agentId)
   if (lists) parts.push(lists)
   return parts.join('\n\n')
@@ -252,7 +255,7 @@ export async function runMemoryPass(ctx: AgentContext): Promise<void> {
   const { recap, verbatim, side } = await loadConversationContext(env, agentId, conversationId)
   const system = await buildSystemPrompt(env, agentId, agentName, side)
   const reminder = await buildPerMessageReminder(env, agentId)
-  const memoryPrompt = "(memory) Instead of replying, look back at the latest exchange. If anything there is worth remembering, record it with record_observation - in your own voice, tagged, following your memory-instructions. If nothing is, do nothing. Do not address Eli here."
+  const memoryPrompt = "(memory) Instead of replying, look back at the latest exchange. If anything there is worth remembering, record it with record_observation - in your own voice, tagged, following your memory-instructions. If nothing is, do nothing. Do not address the person here."
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
     ...recap,

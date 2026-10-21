@@ -12,6 +12,7 @@ import { friendlyError, LlmError, chatCompletion } from './llm'
 import { userDb, migrate } from './user-db'
 import { runCadenceTool } from './cadence-tools'
 import { WS_PROTOCOL } from './access'
+import { firstName, validTimeZone } from './person'
 
 interface ActiveStream {
   conversationId: string
@@ -65,6 +66,7 @@ export class AngelDO implements DurableObject {
     migrate(sql, transact)
     this.env = { ...env, DB: userDb(sql, transact) }
     this.state.blockConcurrencyWhile(async () => {
+      await this.loadPerson()
       await this.syncAlarm().catch(e => console.error('[syncAlarm] init failed:', e))
       await this.resumeInterrupted().catch(e => console.error('[resumeInterrupted] init failed:', e))
     })
@@ -85,6 +87,8 @@ export class AngelDO implements DurableObject {
 
       const pair = new WebSocketPair()
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
+
+      await this.rememberPerson(firstName(decodeURIComponent(request.headers.get('X-Angel-Name') || '')))
 
       this.state.acceptWebSocket(server)
       server.serializeAttachment({ authed: true } satisfies WsAttachment)
@@ -127,6 +131,7 @@ export class AngelDO implements DurableObject {
     // cue for the initial state.
     if (msg.type === 'auth') {
       if (att?.authed) {
+        await this.rememberTimeZone(validTimeZone(msg.tz))
         const snapshots: StreamSnapshot[] = []
         for (const [, stream] of this.activeStreams) {
           snapshots.push({
@@ -196,6 +201,10 @@ export class AngelDO implements DurableObject {
         await this.handleSettingsSet(ws, msg.model, msg.reasoningEffort)
         break
 
+      case 'settings:voice':
+        await this.handleVoiceSet(msg.voice)
+        break
+
       case 'retry':
         await this.handleRetry(msg.conversationId)
         break
@@ -214,6 +223,27 @@ export class AngelDO implements DurableObject {
     ws.close(1011, 'WebSocket error')
   }
 
+  // Who the agent is talking to, for prompts. Kept in storage so wake-ups, which
+  // run with nobody connected, still know.
+  private async loadPerson() {
+    this.env.USER_NAME = await this.state.storage.get<string>('name')
+    this.env.USER_TZ = await this.state.storage.get<string>('tz')
+  }
+
+  private async rememberPerson(name: string | undefined) {
+    if (name !== undefined && name !== this.env.USER_NAME) {
+      this.env.USER_NAME = name
+      await this.state.storage.put('name', name)
+    }
+  }
+
+  private async rememberTimeZone(tz: string | undefined) {
+    if (tz && tz !== this.env.USER_TZ) {
+      this.env.USER_TZ = tz
+      await this.state.storage.put('tz', tz)
+    }
+  }
+
   // First contact for a user: remember who this DO is. Memoised per instance.
   private init(sub: string): Promise<void> {
     this.initialized ??= (async () => {
@@ -228,13 +258,17 @@ export class AngelDO implements DurableObject {
   // both tables generic; the UI just never asks for more than the first row.
   private async loadAgent(): Promise<AgentInfo | null> {
     const row = await this.env.DB.prepare(
-      `SELECT a.id, a.name, a.model, a.reasoning_effort, c.id as conversation_id
+      `SELECT a.id, a.name, a.model, a.reasoning_effort, a.voice, c.id as conversation_id,
+              EXISTS (SELECT 1 FROM messages) AS has_history
        FROM agents a JOIN conversations c ON c.agent_id = a.id
        WHERE c.parent_id IS NULL
        ORDER BY a.created_at, c.created_at LIMIT 1`
-    ).first<{ id: string; name: string; model: string | null; reasoning_effort: string | null; conversation_id: string }>()
+    ).first<{ id: string; name: string; model: string | null; reasoning_effort: string | null; voice: string | null; conversation_id: string; has_history: number }>()
     return row
-      ? { id: row.id, name: row.name, conversationId: row.conversation_id, model: row.model, reasoningEffort: row.reasoning_effort }
+      ? {
+          id: row.id, name: row.name, conversationId: row.conversation_id, model: row.model,
+          reasoningEffort: row.reasoning_effort, voice: row.voice, hasHistory: row.has_history === 1,
+        }
       : null
   }
 
@@ -328,6 +362,16 @@ export class AngelDO implements DurableObject {
     await this.env.DB.prepare(`UPDATE agents SET model = ?, reasoning_effort = ? WHERE id = ?`)
       .bind(model, reasoningEffort, agent.id).run()
     this.broadcast({ type: 'agent:updated', agent: { ...agent, model, reasoningEffort } })
+  }
+
+  // The voice is the person's to set, here and not in chat, so it is only ever
+  // written from this message and read back into the system prompt.
+  private async handleVoiceSet(voice: string | null) {
+    const clean = (voice ?? '').trim().slice(0, 400) || null
+    const agent = await this.loadAgent()
+    if (!agent) return
+    await this.env.DB.prepare(`UPDATE agents SET voice = ? WHERE id = ?`).bind(clean, agent.id).run()
+    this.broadcast({ type: 'agent:updated', agent: { ...agent, voice: clean } })
   }
 
   private async resolveAgent(conversationId: string): Promise<{ agentId: string; agentName: string; agentModel: string | null; agentReasoningEffort: string | null } | null> {
@@ -437,7 +481,7 @@ export class AngelDO implements DurableObject {
     ).bind(conversationId).run()
   }
 
-  // Persist a user-side message (Eli's, or a system-injected one), touch the
+  // Persist a user-side message (the person's, or a system-injected one), touch the
   // conversation, and broadcast it to connected clients.
   private async saveUserMessage(conversationId: string, content: string, clientMsgId: string): Promise<number> {
     const result = await this.env.DB.prepare(

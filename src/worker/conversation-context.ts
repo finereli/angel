@@ -4,6 +4,7 @@
 // own verbatim tail. Side chats never touch the pyramid.
 import type { Env, ChatMessage, ConversationRow, ConversationInfo, StreamSummaryRow } from './types'
 import { STREAM } from './config'
+import { speakerLabel } from './person'
 import { getTotalPairs, getPairsInRange, renderStreamContext, type Pair } from './stream-pyramid'
 
 export async function getConversation(env: Env, id: string): Promise<ConversationRow | null> {
@@ -91,6 +92,6 @@ export async function renderSeedText(env: Env, agentId: string, conversationId: 
   const { tiles, verbatim } = await renderStreamContext(env, agentId, conversationId)
   const parts: string[] = []
   if (tiles.length) parts.push(tiles.map(t => t.text).join('\n\n'))
-  for (const p of verbatim) parts.push(`Eli: ${p.userContent}\nMe: ${p.assistantContent}`)
+  for (const p of verbatim) parts.push(`${speakerLabel(env)}: ${p.userContent}\nMe: ${p.assistantContent}`)
   return parts.join('\n\n')
 }

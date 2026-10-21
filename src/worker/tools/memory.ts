@@ -31,7 +31,7 @@ export const memoryTools: Tool[] = [
       type: 'function',
       function: {
         name: 'recall',
-        description: 'Search your memory. Returns matching observations (specific notes) and summaries (broader integrations, each labeled with how many observations back it). If a summary is close but you need specifics, search again more narrowly.',
+        description: 'Search your memory. Reach for this when the conversation touches something you might have recorded, before answering from what is in front of you alone. Returns matching observations (specific notes) and summaries (broader integrations, each labeled with how many observations back it). If a summary is close but you need specifics, search again more narrowly.',
         parameters: {
           type: 'object',
           properties: {

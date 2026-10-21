@@ -44,6 +44,7 @@ app.get('/ws', async (c) => {
   await noteUser(c.env, who)
   const headers = new Headers(c.req.raw.headers)
   headers.set('X-Angel-Sub', who.sub)
+  headers.set('X-Angel-Name', encodeURIComponent(who.name || ''))
   if (!offersAngelProtocol(c.req.raw)) headers.delete('Sec-WebSocket-Protocol')
   return userStub(c.env, who.sub).fetch(new Request(c.req.raw, { headers }))
 })

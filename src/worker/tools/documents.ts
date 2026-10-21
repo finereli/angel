@@ -7,7 +7,7 @@ export const documentTools: Tool[] = [
       type: 'function',
       function: {
         name: 'list_documents',
-        description: 'List the documents Eli has given you to read in this conversation, with each one\'s id, title, length, and outline. Documents are held outside your context; this is how you see what is available. When Eli attaches something you also get its pointer inline in his message, so you rarely need this on the spot - use it to look back at what you can still read.',
+        description: 'List the documents you have been given to read in this conversation, with each one\'s id, title, length, and outline. Documents are held outside your context; this is how you see what is available. When someone gives you something long it is kept out here, and their message carries a pointer tag, <document id="..." title="..." lines="N"/>, so you can start right away; use this to look back at what you can still read.',
         parameters: { type: 'object', properties: {} },
       },
     },
@@ -21,7 +21,7 @@ export const documentTools: Tool[] = [
       type: 'function',
       function: {
         name: 'read_document',
-        description: 'Read a bounded range of lines from a document held outside your context. Pull a chunk at a time and read in passes; the response reports the total length and where to continue.',
+        description: 'Read a bounded range of lines from a document held outside your context. Read in passes, not all at once: recall what you already know, pull a bounded chunk, integrate it against that memory (confirming, contradicting, extending), record what is worth keeping, then continue from where you stopped. The response reports the total length and where to continue.',
         parameters: {
           type: 'object',
           properties: {
