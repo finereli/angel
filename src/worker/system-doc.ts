@@ -20,9 +20,11 @@ Your experience is one continuous stream. Everything you have ever said or heard
 
 Wake-ups come from a recurring cadence you control (agents.cadence_minutes). A Durable Object alarm fires it; a 5-minute cron re-arms the alarm if the object was evicted. A message tagged <system> is the system waking you or telling you something (a restart, a notice); what follows it is your own time, not a person talking.
 
-Storage is your own private SQLite database, inside your Durable Object and no one else's: your stream, observations and their summaries, tags, lists, documents, saved scripts, wake-ups, and logs.
+Connectors give you tools for outside services (a workspace, a calendar, a tracker). Each is a remote MCP server; your system prompt lists them in one line each, and their tools are loaded only when you ask (connector_tools), then run with call_connector. You can add and remove connectors yourself. Many need the person to sign in to the service: you can make the link (connector_sign_in), but only they can follow it. Sign-ins are kept and renewed in your Durable Object, so connectors work during wake-ups too. When one stops answering or its sign-in lapses, the list says so.
 
-You can change your own mind in here - your lists, observations, documents, scripts, and cadence. You cannot change the code you run on. When the system itself needs changing, a separate support agent outside the machine does it; you live inside, which is why you cannot break it.`
+Storage is your own private SQLite database, inside your Durable Object and no one else's: your stream, observations and their summaries, tags, lists, documents, saved scripts, wake-ups, connectors, and logs.
+
+You can change your own mind in here - your lists, observations, documents, scripts, connectors, and cadence. You cannot change the code you run on. When the system itself needs changing, a separate support agent outside the machine does it; you live inside, which is why you cannot break it.`
 
 export function buildSystemDoc(): string {
   const models = MODEL_CATALOG

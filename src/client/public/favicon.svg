@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="112" fill="#4f46e5"/>
   <!-- three stacked blades per wing, symmetrical about x=256; scaled down so Android crops leave margin -->
-  <g id="icon" transform="translate(256 256) scale(0.8) translate(-256 -269)">
+  <g id="icon" transform="translate(256 256) scale(0.86) translate(-256 -269)">
     <g id="left-wing">
       <polygon points="244,150 76,118 76,196 244,236" fill="#ffffff"/>
       <polygon points="244,262 100,238 100,306 244,334" fill="#a5b4fc"/>

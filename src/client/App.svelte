@@ -8,9 +8,13 @@
   import Icon from '$shared/ui/Icon.svelte'
   import LoginScreen from '$shared/ui/LoginScreen.svelte'
   import Chat from './pages/Chat.svelte'
-  import Settings from './pages/Settings.svelte'
-  import { angel } from './lib/streamManager.svelte'
-  import { router } from './lib/router.svelte'
+  import SettingsIndex from './pages/settings/SettingsIndex.svelte'
+  import AngelSettings from './pages/settings/AngelSettings.svelte'
+  import ConnectorsSettings from './pages/settings/ConnectorsSettings.svelte'
+  import ConnectorDetail from './pages/settings/ConnectorDetail.svelte'
+  import AccountSettings from './pages/settings/AccountSettings.svelte'
+  import { angel, connectorLabel } from './lib/streamManager.svelte'
+  import { router, parentOf } from './lib/router.svelte'
   import { isDark, setDarkMode } from '$shared/lib/theme'
   import { setAccent, storedAccent } from './lib/accent'
 
@@ -26,7 +30,20 @@
   const isChat = $derived(route.view === 'chat' || route.view === 'side')
   const sides = $derived(angel.conversations.filter(c => c.parentId))
   const sideTitle = $derived(route.view === 'side' ? (angel.conversations.find(c => c.id === route.id)?.title || 'New chat') : null)
-  const title = $derived(route.view === 'settings' ? 'Settings' : route.view === 'side' ? sideTitle || 'New chat' : agentName)
+  const isSettings = $derived(route.view === 'settings' || route.view === 'connector')
+  const connectorTitle = $derived.by(() => {
+    if (route.view !== 'connector') return null
+    const c = angel.connectors.find(x => x.id === route.id)
+    return c ? connectorLabel(c) : 'Connector'
+  })
+  const title = $derived(
+    route.view === 'settings'
+      ? (route.section === 'angel' ? agentName : route.section === 'connectors' ? 'Connectors' : route.section === 'account' ? 'Account' : 'Settings')
+      : route.view === 'connector' ? connectorTitle!
+      : route.view === 'side' ? sideTitle || 'New chat' : agentName,
+  )
+  // Settings sub-pages go back up a level; everything else opens the menu.
+  const back = $derived(parentOf(route))
   const activeConvId = $derived(route.view === 'side' ? route.id : route.view === 'chat' ? (angel.mainConversationId ?? '') : '')
   function go(hash: string) {
     menuOpen = false
@@ -94,7 +111,7 @@
   />
 {:else}
   <div class="shell">
-    <TopBar leading="menu" {title} onleading={() => (menuOpen = true)} trailing={newChatIcon} trailingLabel="New side chat" ontrailing={newSideChat}>
+    <TopBar leading={back ? 'back' : 'menu'} {title} onleading={() => (back ? go(back) : (menuOpen = true))} trailing={isSettings ? undefined : newChatIcon} trailingLabel="New side chat" ontrailing={newSideChat}>
       {#snippet titleAfter()}
         {#if isChat}
           <span class="status-dot" class:connected={angel.connState === 'connected'} class:reconnecting={angel.connState !== 'connected'} title={angel.connState === 'connected' ? 'Connected' : 'Connecting...'}></span>
@@ -104,7 +121,12 @@
 
     <div class="body" class:chat={isChat}>
       {#if route.view === 'settings'}
-        <Settings />
+        {#if route.section === 'angel'}<AngelSettings />
+        {:else if route.section === 'connectors'}<ConnectorsSettings />
+        {:else if route.section === 'account'}<AccountSettings />
+        {:else}<SettingsIndex />{/if}
+      {:else if route.view === 'connector'}
+        {#key route.id}<ConnectorDetail id={route.id} />{/key}
       {:else if activeConvId}
         <Chat conversationId={activeConvId} />
       {:else}
@@ -194,7 +216,7 @@
         <button class="icon-btn" onclick={toggleDark} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'} tabindex={menuOpen ? 0 : -1}>
           <Icon name={dark ? 'light_mode' : 'dark_mode'} size={20} />
         </button>
-        <button class="icon-btn" class:current={route.view === 'settings'} onclick={() => go('/settings')} aria-label="Settings" title="Settings" tabindex={menuOpen ? 0 : -1}>
+        <button class="icon-btn" class:current={isSettings} onclick={() => go('/settings')} aria-label="Settings" title="Settings" tabindex={menuOpen ? 0 : -1}>
           <Icon name="settings" size={20} />
         </button>
       </div>

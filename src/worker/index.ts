@@ -10,6 +10,8 @@ import {
 } from './oauth'
 import { mcpHandler } from './mcp'
 import { identify, isAllowed, offersAngelProtocol, type Caller } from './access'
+import { CALLBACK_PATH } from './connectors'
+import { callbackPage } from './callback-page'
 
 export { AngelDO } from './durable-object'
 
@@ -45,8 +47,31 @@ app.get('/ws', async (c) => {
   const headers = new Headers(c.req.raw.headers)
   headers.set('X-Angel-Sub', who.sub)
   headers.set('X-Angel-Name', encodeURIComponent(who.name || ''))
+  headers.set('X-Angel-Origin', new URL(c.req.url).origin)
   if (!offersAngelProtocol(c.req.raw)) headers.delete('Sec-WebSocket-Protocol')
   return userStub(c.env, who.sub).fetch(new Request(c.req.raw, { headers }))
+})
+
+// A connector's sign-in page sends the person back here. The state is the only
+// thing that says whose it is: look it up, hand the code to that user's DO, and
+// show a page that closes itself when it was opened as a popup.
+app.get(CALLBACK_PATH, async (c) => {
+  const state = c.req.query('state') || ''
+  const code = c.req.query('code') || ''
+  const denied = c.req.query('error_description') || c.req.query('error')
+  const row = state
+    ? await c.env.DB.prepare(`SELECT sub FROM connector_auth WHERE state = ?`).bind(state).first<{ sub: string }>()
+    : null
+  if (!row) return c.html(callbackPage(false, 'This sign-in link is no longer valid. Start again from Settings.'), 400)
+  await c.env.DB.prepare(`DELETE FROM connector_auth WHERE state = ?`).bind(state).run()
+  if (denied || !code) return c.html(callbackPage(false, denied ? `The sign-in was cancelled: ${denied}` : 'The server sent no sign-in code.'), 400)
+  const res = await userStub(c.env, row.sub).fetch(new Request('http://do/api/connector-callback', {
+    method: 'POST', body: JSON.stringify({ state, code }),
+  }))
+  const out = await res.json() as { ok: boolean; name?: string; status?: string; error?: string | null }
+  if (!out.ok) return c.html(callbackPage(false, out.error || 'The sign-in failed.'), 400)
+  if (out.status !== 'connected') return c.html(callbackPage(false, `Signed in to ${out.name}, but it isn't answering yet: ${out.error}`))
+  return c.html(callbackPage(true, `Connected ${out.name}. You can close this tab.`))
 })
 
 // Health check (no auth)

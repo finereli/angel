@@ -13,6 +13,7 @@ import { userDb, migrate } from './user-db'
 import { runCadenceTool } from './cadence-tools'
 import { WS_PROTOCOL } from './access'
 import { firstName, validTimeZone } from './person'
+import { listConnectors, addConnector, removeConnector, startSignIn, finishSignIn, reloadConnector } from './connectors'
 
 interface ActiveStream {
   conversationId: string
@@ -64,7 +65,7 @@ export class AngelDO implements DurableObject {
     const sql = state.storage.sql
     const transact = <T>(fn: () => T) => state.storage.transactionSync(fn)
     migrate(sql, transact)
-    this.env = { ...env, DB: userDb(sql, transact) }
+    this.env = { ...env, DB: userDb(sql, transact), CONTROL_DB: env.DB }
     this.state.blockConcurrencyWhile(async () => {
       await this.loadPerson()
       await this.syncAlarm().catch(e => console.error('[syncAlarm] init failed:', e))
@@ -89,6 +90,7 @@ export class AngelDO implements DurableObject {
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
 
       await this.rememberPerson(firstName(decodeURIComponent(request.headers.get('X-Angel-Name') || '')))
+      await this.rememberOrigin(request.headers.get('X-Angel-Origin'))
 
       this.state.acceptWebSocket(server)
       server.serializeAttachment({ authed: true } satisfies WsAttachment)
@@ -109,6 +111,18 @@ export class AngelDO implements DurableObject {
     if (request.method === 'POST' && url.pathname === '/api/tool') {
       const { name, args } = await request.json() as { name: string; args: Record<string, unknown> }
       return Response.json(await runCadenceTool(this.env, name, args ?? {}, () => this.syncAlarm()))
+    }
+    // A connector sign-in came back; the worker matched the state to this user.
+    if (request.method === 'POST' && url.pathname === '/api/connector-callback') {
+      const { state, code } = await request.json() as { state: string; code: string }
+      try {
+        const connector = await finishSignIn(this.env, state, code)
+        await this.broadcastConnectors()
+        return Response.json({ ok: true, name: connector.serverName || connector.name, status: connector.status, error: connector.error })
+      } catch (e) {
+        await this.broadcastConnectors()
+        return Response.json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+      }
     }
 
     return new Response('Not found', { status: 404 })
@@ -216,6 +230,31 @@ export class AngelDO implements DurableObject {
       case 'account:reset':
         await this.handleAccountReset()
         break
+
+      case 'connectors:list':
+        this.send(ws, { type: 'connectors', connectors: await listConnectors(this.env) })
+        break
+
+      case 'connector:add':
+        await this.connectorAction(ws, undefined, async () => {
+          const { connector, signInUrl } = await addConnector(this.env, { url: msg.url, name: msg.name, token: msg.token, addedBy: 'person' })
+          if (signInUrl) this.send(ws, { type: 'connector:sign-in', id: connector.id, url: signInUrl })
+        })
+        break
+
+      case 'connector:remove':
+        await this.connectorAction(ws, msg.id, async () => { await removeConnector(this.env, msg.id) })
+        break
+
+      case 'connector:sign-in':
+        await this.connectorAction(ws, msg.id, async () => {
+          this.send(ws, { type: 'connector:sign-in', id: msg.id, url: await startSignIn(this.env, msg.id) })
+        })
+        break
+
+      case 'connector:reload':
+        await this.connectorAction(ws, msg.id, async () => { await reloadConnector(this.env, msg.id) })
+        break
     }
   }
 
@@ -232,6 +271,8 @@ export class AngelDO implements DurableObject {
   private async loadPerson() {
     this.env.USER_NAME = await this.state.storage.get<string>('name')
     this.env.USER_TZ = await this.state.storage.get<string>('tz')
+    this.env.USER_SUB = await this.state.storage.get<string>('sub')
+    this.env.APP_ORIGIN = await this.state.storage.get<string>('origin')
   }
 
   private async rememberPerson(name: string | undefined) {
@@ -239,6 +280,28 @@ export class AngelDO implements DurableObject {
       this.env.USER_NAME = name
       await this.state.storage.put('name', name)
     }
+  }
+
+  // Where the app is served from, for OAuth redirects that must come back here.
+  private async rememberOrigin(origin: string | null) {
+    if (origin && origin !== this.env.APP_ORIGIN) {
+      this.env.APP_ORIGIN = origin
+      await this.state.storage.put('origin', origin)
+    }
+  }
+
+  private async broadcastConnectors() {
+    this.broadcast({ type: 'connectors', connectors: await listConnectors(this.env) })
+  }
+
+  // Run a connector change from Settings, then show everyone the new list.
+  private async connectorAction(ws: WebSocket, id: string | undefined, fn: () => Promise<void>) {
+    try {
+      await fn()
+    } catch (e) {
+      this.send(ws, { type: 'connector:error', id, message: e instanceof Error ? e.message : String(e) })
+    }
+    await this.broadcastConnectors()
   }
 
   private async rememberTimeZone(tz: string | undefined) {
@@ -252,6 +315,7 @@ export class AngelDO implements DurableObject {
   private init(sub: string): Promise<void> {
     this.initialized ??= (async () => {
       if ((await this.state.storage.get('sub')) !== sub) await this.state.storage.put('sub', sub)
+      this.env.USER_SUB = sub
     })().catch(e => { this.initialized = null; throw e })
     return this.initialized
   }
@@ -455,6 +519,7 @@ export class AngelDO implements DurableObject {
     await this.state.storage.deleteAll()
     migrate(this.state.storage.sql, fn => this.state.storage.transactionSync(fn))
     if (sub) await this.state.storage.put('sub', sub)
+    if (this.env.APP_ORIGIN) await this.state.storage.put('origin', this.env.APP_ORIGIN)
     this.processedClientMsgs.clear()
     this.pendingTurns.clear()
     this.broadcast({ type: 'account:reset:done' })

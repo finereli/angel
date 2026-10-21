@@ -6,17 +6,18 @@ import { hexToHsl } from '$shared/lib/theme'
 
 const WINGS = `<g id="left-wing"><polygon points="244,150 76,118 76,196 244,236" fill="#fff"/><polygon points="244,262 100,238 100,306 244,334" fill="MID"/><polygon points="244,360 138,346 138,404 244,420" fill="TOP"/></g><g id="right-wing"><polygon points="268,150 436,118 436,196 268,236" fill="#fff"/><polygon points="268,262 412,238 412,306 268,334" fill="MID"/><polygon points="268,360 374,346 374,404 268,420" fill="TOP"/></g>`
 
-// Wing scale: smaller on the maskable icon, since Android crops it to a circle
-// and anything past the central 80% is lost.
-export const ICON_SCALE = 0.8
-export const MASKABLE_SCALE = 0.62
+// Wing scale, matching logos/make-icons.py. Smaller on the maskable icon, since
+// Android crops it and anything past the central 80% is lost.
+export const ICON_SCALE = 0.86
+export const MASKABLE_SCALE = 0.76
 
-export function iconSvg(hex: string, opts: { maskable?: boolean } = {}): string {
+export function iconSvg(hex: string, opts: { maskable?: boolean; rounded?: boolean } = {}): string {
   const [h, s, l] = hexToHsl(hex)
   const bg = `hsl(${h}, ${s}%, ${Math.max(l - 8, 10)}%)`
   const mid = `hsl(${h}, ${Math.min(s, 90)}%, 76%)`
   const scale = opts.maskable ? MASKABLE_SCALE : ICON_SCALE
-  const rect = opts.maskable ? '<rect width="512" height="512" fill="BG"/>' : '<rect width="512" height="512" rx="112" fill="BG"/>'
+  // PNG icons are opaque squares (platforms round them); only the tab favicon is rounded.
+  const rect = opts.rounded ? '<rect width="512" height="512" rx="112" fill="BG"/>' : '<rect width="512" height="512" fill="BG"/>'
   const body = (rect + `<g transform="translate(256 256) scale(${scale}) translate(-256 -269)">${WINGS}</g>`)
     .replaceAll('BG', bg).replaceAll('MID', mid).replaceAll('TOP', hex)
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">${body}</svg>`
@@ -68,7 +69,7 @@ export async function applyAppIcon(hex: string | null) {
       rasterize(iconSvg(hex), 512), rasterize(iconSvg(hex, { maskable: true }), 512),
     ])
     if (mine !== seq) return // a newer pick overtook this one
-    link('icon', { type: 'image/svg+xml', href: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(iconSvg(hex)) })
+    link('icon', { type: 'image/svg+xml', href: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(iconSvg(hex, { rounded: true })) })
     link('apple-touch-icon', { href: p180 })
 
     const real = document.head.querySelector<HTMLLinkElement>('link[rel="manifest"]')

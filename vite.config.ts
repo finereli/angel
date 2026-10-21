@@ -20,7 +20,7 @@ export default defineConfig({
     svelte(),
     VitePWA(
       pwaOptions({
-        includeAssets: ['favicon.svg', 'favicon-32.png', 'apple-touch-icon.png', 'icon-512-maskable.png', 'logo-mark.svg'],
+        includeAssets: ['favicon.svg', 'favicon-32.png', 'apple-touch-icon.png', 'logo-mark.svg'],
         manifest: {
           name: 'Angel',
           short_name: 'Angel',
@@ -35,7 +35,7 @@ export default defineConfig({
           icons: [
             { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
             { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-            { src: '/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+            { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
           ],
         },
       })

@@ -241,4 +241,25 @@ UPDATE conversations SET title = 'Main' WHERE id = 'main' AND parent_id IS NULL;
 `-- The accent colour the person picked in Settings, as #rrggbb. NULL = the app default.
 ALTER TABLE agents ADD COLUMN accent TEXT DEFAULT NULL;
 `,
+`-- Connectors: remote MCP servers Angel can use. auth is none, token (a pasted
+-- bearer token) or oauth (the JSON state in oauth: client registration, tokens,
+-- and a pending sign-in). tools caches the server's last tools/list.
+CREATE TABLE connectors (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  url TEXT NOT NULL UNIQUE,
+  description TEXT,
+  auth TEXT NOT NULL DEFAULT 'none',
+  token TEXT,
+  oauth TEXT,
+  status TEXT NOT NULL DEFAULT 'error',
+  error TEXT,
+  tools TEXT,
+  server_info TEXT,
+  tools_at TEXT,
+  added_by TEXT NOT NULL DEFAULT 'person',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`,
 ]

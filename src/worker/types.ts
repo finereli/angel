@@ -13,7 +13,15 @@ export interface Env {
   // Set inside a user's DO only (see durable-object.ts): who they are and where.
   USER_NAME?: string
   USER_TZ?: string
+  USER_SUB?: string
+  // The app's public origin, for links that come back to it (OAuth redirects).
+  APP_ORIGIN?: string
+  // Inside the DO, DB is the user's own database; this is the shared D1.
+  CONTROL_DB?: D1Database
 }
+
+import type { ConnectorInfo } from './connectors'
+export type { ConnectorInfo }
 
 // DB row types
 
@@ -212,6 +220,11 @@ export type ClientMsg =
   | { type: 'settings:accent'; accent: string | null }
   | { type: 'retry'; conversationId: string }
   | { type: 'account:reset' }
+  | { type: 'connectors:list' }
+  | { type: 'connector:add'; url: string; name?: string; token?: string }
+  | { type: 'connector:remove'; id: string }
+  | { type: 'connector:sign-in'; id: string }
+  | { type: 'connector:reload'; id: string }
 
 export type ServerMsg =
   | { type: 'auth:ok'; activeStreams: StreamSnapshot[]; agent: AgentInfo | null; pendingTurns: string[] }
@@ -235,6 +248,9 @@ export type ServerMsg =
   | { type: 'doc:error'; conversationId: string; clientDocId: string; message: string }
   | { type: 'agent:updated'; agent: AgentInfo }
   | { type: 'settings:error'; message: string }
+  | { type: 'connectors'; connectors: ConnectorInfo[] }
+  | { type: 'connector:sign-in'; id: string; url: string }
+  | { type: 'connector:error'; id?: string; message: string }
 
 // Agent event types (internal, yielded by the agent loop)
 export type AgentEvent =
