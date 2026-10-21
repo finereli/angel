@@ -9,7 +9,6 @@ export interface Env {
   PIN: string
   OPENROUTER_API_KEY: string
   OWNER_EMAIL: string
-  ALLOWED_EMAILS?: string
   DEV_AUTH?: string
   // Set inside a user's DO only (see durable-object.ts): who they are and where.
   USER_NAME?: string

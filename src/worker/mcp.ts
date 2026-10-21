@@ -1,6 +1,7 @@
 import type { Context } from 'hono'
 import type { Env } from './types'
 import { verifyToken } from './oauth'
+import { ownerSub } from './access'
 
 type C = Context<{ Bindings: Env }>
 
@@ -48,9 +49,9 @@ const MCP_TOOLS = [
 // Until MCP gets per-user OAuth, the only user an MCP token can speak for is the
 // owner (OWNER_EMAIL), found through the shared users table.
 async function callTool(env: Env, name: string, args: Record<string, unknown>): Promise<{ text: string; isError?: boolean }> {
-  const owner = await env.DB.prepare(`SELECT sub FROM users WHERE email = ?`).bind(env.OWNER_EMAIL).first<{ sub: string }>()
-  if (!owner) return { text: 'The owner has not signed in yet.', isError: true }
-  const stub = env.ANGEL_DO.get(env.ANGEL_DO.idFromName(owner.sub))
+  const sub = await ownerSub(env)
+  if (!sub) return { text: 'The owner has not signed in yet.', isError: true }
+  const stub = env.ANGEL_DO.get(env.ANGEL_DO.idFromName(sub))
   const res = await stub.fetch('http://do/api/tool', { method: 'POST', body: JSON.stringify({ name, args }) })
   return await res.json() as { text: string; isError?: boolean }
 }

@@ -15,10 +15,10 @@
   interface Auth { signIn(): unknown; signOut(): unknown }
   let {
     auth, title, subtitle = '', icon = '/icons/icon-192.png', buttonLabel = 'Sign in with Google', compact = false, children,
-    denied = false, deniedText = 'You do not have access', signOutLabel = 'Sign out',
+    denied = false, deniedText = 'You do not have access', deniedLink, signOutLabel = 'Sign out',
   }: {
     auth: Auth; title: string; subtitle?: string; icon?: string; buttonLabel?: string; compact?: boolean; children?: Snippet
-    denied?: boolean; deniedText?: string; signOutLabel?: string
+    denied?: boolean; deniedText?: string; deniedLink?: { href: string; label: string }; signOutLabel?: string
   } = $props()
   const logoSize = $derived(compact ? 56 : 80)
 </script>
@@ -32,6 +32,9 @@
 
     {#if denied}
       <p class="denied">{deniedText}</p>
+      {#if deniedLink}
+        <a class="denied-link" href={deniedLink.href} target="_blank" rel="noopener noreferrer">{deniedLink.label}</a>
+      {/if}
       <button class="secondary-btn" onclick={() => auth.signOut()}>{signOutLabel}</button>
     {:else}
       <button class="google-btn" onclick={() => auth.signIn()}>
@@ -80,6 +83,14 @@
     font-size: 0.9rem;
     color: #fee2e2;
     margin-bottom: 12px;
+  }
+  .denied-link {
+    margin-bottom: 16px;
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 500;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
   .secondary-btn {
     padding: 12px 28px;

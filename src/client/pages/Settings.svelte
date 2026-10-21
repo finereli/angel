@@ -1,6 +1,7 @@
 <script lang="ts">
   import { angel } from '../lib/streamManager.svelte'
   import ResetButton from '$shared/ui/ResetButton.svelte'
+  import { DEFAULT_VOICE, effectiveVoice } from '../../worker/voice'
   import { MODEL_CATALOG, REASONING_EFFORTS, modelSupportsReasoning, resolveModel, modelLabel } from '../../worker/models'
 
   const selectedModel = $derived(resolveModel(angel.agent?.model))
@@ -33,12 +34,18 @@
 
   // Voice: how Angel sounds. Set here, never in chat, because a model asked to
   // change its own personality mid-conversation tends to resist.
-  const savedVoice = $derived(angel.agent?.voice ?? '')
+  // Saved null is "the default", an empty box is a deliberate "no voice".
+  const savedVoice = $derived(effectiveVoice(angel.agent?.voice))
   let voiceDraft = $state<string | null>(null) // null = untouched
   const voiceText = $derived(voiceDraft ?? savedVoice)
   const voiceDirty = $derived(voiceDraft !== null && voiceDraft.trim() !== savedVoice)
+  const isDefaultVoice = $derived(angel.agent?.voice === null)
   function saveVoice() {
-    angel.setVoice(voiceText.trim() || null)
+    angel.setVoice(voiceText.trim())
+    voiceDraft = null
+  }
+  function resetVoice() {
+    angel.setVoice(null)
     voiceDraft = null
   }
 
@@ -97,22 +104,22 @@
     <h3>Voice</h3>
     <p class="hint">
       How {angel.agent?.name || 'Angel'} sounds, in a sentence. It's set here and not in the chat, because models tend to
-      resist when asked to change their own personality. It applies from the next message.
+      resist when asked to change their own personality. It applies from the next message. Empty means no voice at all.
     </p>
     <textarea
       class="voice"
       rows="3"
       maxlength="400"
       aria-label="Voice"
-      placeholder="Use the voice of Richard Feynman, but as a warm companion"
+      placeholder="Leave empty for no voice"
       disabled={!angel.agentLoaded}
       value={voiceText}
       oninput={(e) => (voiceDraft = e.currentTarget.value)}
     ></textarea>
     <div class="confirm-row">
       <button class="apply-btn" disabled={!voiceDirty} onclick={saveVoice}>Save voice</button>
-      {#if savedVoice && voiceDraft === null}
-        <button class="quiet-btn neutral" onclick={() => { voiceDraft = ''; saveVoice() }}>Clear</button>
+      {#if !isDefaultVoice || (voiceDraft !== null && voiceDraft.trim() !== DEFAULT_VOICE)}
+        <button class="quiet-btn neutral" onclick={resetVoice}>Back to the default</button>
       {/if}
     </div>
   </section>

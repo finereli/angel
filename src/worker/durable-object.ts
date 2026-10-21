@@ -367,7 +367,8 @@ export class AngelDO implements DurableObject {
   // The voice is the person's to set, here and not in chat, so it is only ever
   // written from this message and read back into the system prompt.
   private async handleVoiceSet(voice: string | null) {
-    const clean = (voice ?? '').trim().slice(0, 400) || null
+    // null puts the default back; an empty string is a deliberate "no voice".
+    const clean = voice === null ? null : voice.trim().slice(0, 400)
     const agent = await this.loadAgent()
     if (!agent) return
     await this.env.DB.prepare(`UPDATE agents SET voice = ? WHERE id = ?`).bind(clean, agent.id).run()

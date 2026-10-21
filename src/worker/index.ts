@@ -31,7 +31,7 @@ async function noteUser(env: Env, who: Caller) {
 app.get('/api/me', async (c) => {
   const who = await identify(c.env, c.req.raw)
   if (!who) return c.json({ error: 'unauthorized' }, 401)
-  if (!isAllowed(c.env, who.email)) return c.json({ error: 'not_allowed', email: who.email }, 403)
+  if (!(await isAllowed(c.env, who.email))) return c.json({ error: 'not_allowed', email: who.email }, 403)
   return c.json({ email: who.email, name: who.name })
 })
 
@@ -40,7 +40,7 @@ app.get('/api/me', async (c) => {
 app.get('/ws', async (c) => {
   const who = await identify(c.env, c.req.raw)
   if (!who) return c.text('Unauthorized', 401)
-  if (!isAllowed(c.env, who.email)) return c.text('Not allowed', 403)
+  if (!(await isAllowed(c.env, who.email))) return c.text('Not allowed', 403)
   await noteUser(c.env, who)
   const headers = new Headers(c.req.raw.headers)
   headers.set('X-Angel-Sub', who.sub)

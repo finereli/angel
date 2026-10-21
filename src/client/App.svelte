@@ -84,7 +84,8 @@
     subtitle="A COMPANION WITH A MEMORY"
     icon="/icon-192.png"
     denied={angel.denied !== null}
-    deniedText={`${angel.denied || 'This account'} is not on the list yet.`}
+    deniedText={`${angel.denied || 'This account'} isn't on the list. Angel is invite-only for now.`}
+    deniedLink={{ href: 'https://x.com/finereli', label: 'Say hi on X: @finereli' }}
   />
 {:else}
   <div class="shell">

@@ -1,6 +1,7 @@
 import type { Env, ChatMessage, ToolCall, AgentEvent, ServerMsg } from './types'
 import { chatCompletionStream, getModel, LlmError } from './llm'
 import { personName } from './person'
+import { effectiveVoice } from './voice'
 import { getToolDefinitions, executeTool, toolDoneLabel, TOOL_LABELS, type ToolContext } from './tools/registry'
 import { buildOperatingNotes } from './identity'
 import { buildListsPreamble, buildPerMessageReminder } from './lists'
@@ -86,7 +87,7 @@ You're in a side conversation${name}, branched off the main line at ${when}. ${p
 async function buildSystemPrompt(env: Env, agentId: string, agentName: string, side: SideInfo | null = null): Promise<string> {
   const row = await env.DB.prepare(`SELECT voice FROM agents WHERE id = ?`).bind(agentId).first<{ voice: string | null }>()
   const person = personName(env)
-  const parts = [buildOperatingNotes(agentName, person, row?.voice)]
+  const parts = [buildOperatingNotes(agentName, person, effectiveVoice(row?.voice))]
   if (side) parts.push(sidePreamble(side, person))
   const lists = await buildListsPreamble(env, agentId)
   if (lists) parts.push(lists)
