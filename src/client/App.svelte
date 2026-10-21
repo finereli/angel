@@ -247,7 +247,6 @@
     color: var(--text-primary);
     font-size: 1.05rem;
   }
-  .main-row { margin-bottom: 14px; }
 
   .side-head {
     display: flex;
@@ -272,6 +271,8 @@
     border-radius: 10px;
   }
   .row:hover, .row.current { background: var(--bg-hover); }
+  /* After .row, whose `margin: 0 10px` would otherwise zero this out. */
+  .row.main-row { margin-bottom: 20px; }
   .row-main {
     flex: 1;
     min-width: 0;
