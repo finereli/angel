@@ -16,10 +16,6 @@
     angel.removeConnector(id)
     location.hash = '/settings/connectors'
   }
-
-  let showAllTools = $state(false)
-  const TOOL_PREVIEW = 8
-  const shownTools = $derived(c ? (showAllTools ? c.tools : c.tools.slice(0, TOOL_PREVIEW)) : [])
 </script>
 
 <SettingsPage title={c ? connectorLabel(c) : 'Connector'} back="/settings/connectors" backLabel="Connectors">
@@ -51,7 +47,7 @@
         {:else if c.status === 'error'}
           <button class="apply-btn" onclick={() => angel.reloadConnector(c.id)}>Try again</button>
         {:else}
-          <button class="quiet-btn neutral" onclick={() => angel.reloadConnector(c.id)}>Refresh tools</button>
+          <button class="quiet-btn neutral" onclick={() => angel.reloadConnector(c.id)}>Refresh</button>
           {#if c.auth === 'oauth'}
             <button class="quiet-btn neutral" onclick={() => angel.signInConnector(c.id)}>Sign in again</button>
           {/if}
@@ -61,21 +57,6 @@
         <p class="hint after">Opens {connectorLabel(c)}'s sign-in page. Come back here when it says you're connected.</p>
       {/if}
     </section>
-
-    {#if c.tools.length}
-      <section>
-        <h3>Tools</h3>
-        <p class="hint">What {name} can do with it. {c.tools.length} in all.</p>
-        <ul class="tools">
-          {#each shownTools as t (t.name)}
-            <li><code>{t.name}</code>{#if t.description}<span>{t.description}</span>{/if}</li>
-          {/each}
-        </ul>
-        {#if c.tools.length > TOOL_PREVIEW && !showAllTools}
-          <button class="quiet-btn neutral more" onclick={() => (showAllTools = true)}>Show all {c.tools.length}</button>
-        {/if}
-      </section>
-    {/if}
 
     <section>
       <h3>Remove</h3>
@@ -105,17 +86,4 @@
   .facts dd { margin: 0; color: var(--text-primary); min-width: 0; }
   .url { overflow-wrap: anywhere; }
   .after { margin-top: 10px; }
-  .tools { list-style: none; margin: 0; padding: 0; }
-  .tools li {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 8px 0;
-    border-top: 1px solid var(--border);
-    font-size: 0.82rem;
-    color: var(--text-secondary);
-  }
-  .tools li:first-child { border-top: none; }
-  .tools code { font-size: 0.82rem; color: var(--text-primary); }
-  .more { margin-top: 8px; }
 </style>
