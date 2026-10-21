@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full-bleed square for the PNG app icons: the platform rounds the corners
+       itself, and transparent corners make launchers shrink the icon onto a plate.
+       Glyph at 86% of logo.svg, centred, so it sits inside the maskable safe zone. -->
+  <rect width="512" height="512" fill="#4f46e5"/>
+  <g transform="translate(256,256) scale(0.86) translate(-256,-269)">
+    <polygon points="244,150 76,118 76,196 244,236" fill="#ffffff"/>
+    <polygon points="244,262 100,238 100,306 244,334" fill="#a5b4fc"/>
+    <polygon points="244,360 138,346 138,404 244,420" fill="#6366f1"/>
+    <polygon points="268,150 436,118 436,196 268,236" fill="#ffffff"/>
+    <polygon points="268,262 412,238 412,306 268,334" fill="#a5b4fc"/>
+    <polygon points="268,360 374,346 374,404 268,420" fill="#6366f1"/>
+  </g>
+</svg>
