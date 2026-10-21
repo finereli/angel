@@ -1,15 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect id="background" width="512" height="512" rx="112" fill="#6366f1"/>
-  <g id="halo">
-    <path d="M176 112 C176 78 222 64 258 66 C298 64 342 80 338 114 C334 146 290 156 254 154 C214 156 176 142 176 112 Z M222 112 C224 124 240 128 256 127 C276 128 292 124 294 112 C292 100 276 94 256 95 C238 94 220 100 222 112 Z" fill="#fcd34d" fill-rule="evenodd"/>
-  </g>
   <g id="icon">
-    <path d="M256 180 C190 178 144 226 142 292 C141 340 138 388 132 416 C150 428 166 404 184 410 C204 418 214 442 234 440 C250 438 254 420 270 424 C290 428 296 446 316 442 C334 438 338 412 358 410 C374 408 384 426 394 414 C388 384 372 340 370 292 C368 226 322 182 256 180 Z" fill="#ffffff"/>
-    <path d="M150 360 C158 392 156 408 150 420 C166 424 176 408 188 412 C176 396 166 380 150 360 Z" fill="#a5b4fc"/>
-    <ellipse cx="214" cy="288" rx="17" ry="21" fill="#4f46e5"/>
-    <ellipse cx="300" cy="288" rx="17" ry="21" fill="#4f46e5"/>
-    <path d="M232 332 C242 350 270 350 282 332 C270 340 244 340 232 332 Z" fill="#4f46e5" stroke="#4f46e5" stroke-width="8" stroke-linejoin="round"/>
-    <ellipse cx="180" cy="326" rx="16" ry="11" fill="#a5b4fc"/>
-    <ellipse cx="334" cy="326" rx="16" ry="11" fill="#a5b4fc"/>
+    <rect width="512" height="512" rx="112" fill="#6366f1"/>
+    <path d="M368.8 215A120 120 0 1 1 297 143.2" fill="none" stroke="#ffffff" stroke-width="56"/>
+    <circle cx="352" cy="160" r="28" fill="#a5b4fc"/>
   </g>
 </svg>

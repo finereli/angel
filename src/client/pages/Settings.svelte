@@ -6,6 +6,7 @@
   const selectedModel = $derived(resolveModel(angel.agent?.model))
   const selectedEffort = $derived(angel.agent?.reasoningEffort ?? null)
   const reasoningSupported = $derived(modelSupportsReasoning(selectedModel))
+  const loaded = $derived(angel.agentLoaded)
 
   const price = (n: number) => `$${n.toFixed(2)}`
 
@@ -36,12 +37,16 @@
   <section>
     <h3>Model</h3>
     <p class="hint">Which model {angel.agent?.name || 'Angel'} thinks with. Prices are per 1M tokens, input / output.</p>
+    <!-- Until the server says which model is saved, the box stays empty and
+         disabled rather than showing the default and then jumping. -->
     <select
       class="select"
       aria-label="Model"
-      value={selectedModel}
+      disabled={!angel.agentLoaded}
+      value={angel.agentLoaded ? selectedModel : ''}
       onchange={(e) => chooseModel(e.currentTarget.value)}
     >
+      {#if !angel.agentLoaded}<option value="">Loading...</option>{/if}
       {#each MODEL_CATALOG as m (m.id)}
         <option value={m.id}>{m.label} - {price(m.priceInPerM)} / {price(m.priceOutPerM)}</option>
       {/each}
@@ -50,7 +55,9 @@
 
   <section>
     <h3>Thinking effort</h3>
-    {#if reasoningSupported}
+    {#if !loaded}
+      <p class="hint">Loading...</p>
+    {:else if reasoningSupported}
       <p class="hint">How hard the model reasons before answering. Higher costs more and answers slower.</p>
       <div class="effort-row">
         <label class="option option-inline">

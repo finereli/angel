@@ -70,6 +70,8 @@ class AngelClient {
   settingsError = $state<string | null>(null)
   convStates = $state<Record<string, ConversationState>>({})
   conversations = $state<ConversationInfo[]>([])
+  // False until the server has answered conv:list, so the UI can tell "none yet" from "not loaded".
+  conversationsLoaded = $state(false)
 
   #ws: WebSocket | null = null
   #docListeners = new Set<DocListener>()
@@ -133,6 +135,7 @@ class AngelClient {
     this.agentLoaded = false
     this.convStates = {}
     this.conversations = []
+    this.conversationsLoaded = false
     this.denied = null
   }
 
@@ -349,6 +352,7 @@ class AngelClient {
 
       case 'conv:list':
         this.conversations = msg.conversations
+        this.conversationsLoaded = true
         break
 
       case 'conv:created':

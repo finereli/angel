@@ -166,7 +166,9 @@
           {/if}
         </div>
       {:else}
-        <p class="empty">Nothing here yet. Side chats are for thinking out loud without touching the main thread.</p>
+        {#if angel.conversationsLoaded}
+          <p class="empty">Nothing here yet. Side chats are for thinking out loud without touching the main thread.</p>
+        {/if}
       {/each}
     {/snippet}
 

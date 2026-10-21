@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect id="background" x="0" y="0" width="512" height="512" rx="112" fill="#6366f1"/>
+  <g id="icon" stroke-linejoin="round" stroke-linecap="round">
+    <path id="wing-shadow" d="M104 322 C84 238 128 150 214 118 C282 92 362 112 408 164 C426 186 424 206 406 214 C432 226 438 252 416 266 C428 288 410 314 384 316 C378 346 340 372 296 372 C220 376 128 372 104 322 Z" fill="#4f46e5" transform="translate(10 14)"/>
+    <path id="wing" d="M104 322 C84 238 128 150 214 118 C282 92 362 112 408 164 C426 186 424 206 406 214 C432 226 438 252 416 266 C428 288 410 314 384 316 C378 346 340 372 296 372 C220 376 128 372 104 322 Z" fill="#ffffff" stroke="#ffffff" stroke-width="8"/>
+    <g id="feather-lines" fill="none" stroke="#a5b4fc" stroke-width="10">
+      <path d="M200 300 C240 296 290 284 330 250"/>
+      <path d="M180 246 C226 240 272 224 310 190"/>
+      <path d="M182 196 C208 186 232 172 252 150"/>
+    </g>
+  </g>
+</svg>
