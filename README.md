@@ -2,7 +2,7 @@
 
 A companion agent with one linear, effectively unbounded experience. Everything Angel has ever said or heard is a single append-only stream; "conversations" are just how Eli files topics on his side. Angel's memory isn't walled to any thread.
 
-Runs on Cloudflare Workers (one Durable Object owns the stream) + D1, talking through DeepSeek via OpenRouter. The same model that talks also writes and compresses the memory, so its voice carries across time.
+Runs on Cloudflare Workers. Each person signs in with Google (login.finereli.com) and gets their own Durable Object with its own SQLite, which owns their stream. It talks to models through OpenRouter (DeepSeek by default). The same model that talks also writes and compresses the memory, so its voice carries across time.
 
 ## The architecture
 

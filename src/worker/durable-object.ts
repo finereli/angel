@@ -8,6 +8,10 @@ import { buildObservationPyramid } from './memory'
 import { buildStreamPyramid } from './stream-pyramid'
 import { getConversation, conversationInfo, renderSeedText } from './conversation-context'
 import { isKnownModel, isReasoningEffort } from './models'
+import { userDb, migrate } from './user-db'
+import { importLegacy } from './legacy-import'
+import { runCadenceTool } from './cadence-tools'
+import { WS_PROTOCOL } from './access'
 
 interface ActiveStream {
   conversationId: string
@@ -22,9 +26,10 @@ interface ActiveStream {
   savedMsgId: number | null // D1 row id once the in-progress message has been persisted
 }
 
+// The worker authenticates the upgrade (login.finereli.com token) before the
+// request reaches this DO, so a socket is authed from the moment it exists.
 interface WsAttachment {
   authed: boolean
-  timeoutId?: number // pending auth-timeout timer, cleared on successful auth
 }
 
 // Only parts a saved reply should carry: text, and tools that actually finished.
@@ -36,7 +41,11 @@ function completedParts(parts: StreamPart[]): StreamPart[] {
 
 export class AngelDO implements DurableObject {
   private state: DurableObjectState
+  // Env as the rest of the worker sees it: DB is this user's private SQLite.
   private env: Env
+  // The real env, for the one thing that still reads shared D1 (legacy import).
+  private sharedEnv: Env
+  private initialized: Promise<void> | null = null
   private activeStreams = new Map<string, ActiveStream>()
   // Responses stream one at a time (one linear stream); memory work runs on its
   // own serialized chain so it never blocks the next response.
@@ -53,7 +62,11 @@ export class AngelDO implements DurableObject {
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
-    this.env = env
+    this.sharedEnv = env
+    const sql = state.storage.sql
+    const transact = <T>(fn: () => T) => state.storage.transactionSync(fn)
+    migrate(sql, transact)
+    this.env = { ...env, DB: userDb(sql, transact) }
     this.state.blockConcurrencyWhile(async () => {
       await this.syncAlarm().catch(e => console.error('[syncAlarm] init failed:', e))
       await this.resumeInterrupted().catch(e => console.error('[resumeInterrupted] init failed:', e))
@@ -68,28 +81,33 @@ export class AngelDO implements DurableObject {
         return new Response('Expected WebSocket', { status: 426 })
       }
 
+      // Set by the worker after it verified the token; never from the client.
+      const sub = request.headers.get('X-Angel-Sub')
+      if (!sub) return new Response('Unauthorized', { status: 401 })
+      await this.init(sub, request.headers.get('X-Angel-Owner') === '1')
+
       const pair = new WebSocketPair()
       const [client, server] = Object.values(pair) as [WebSocket, WebSocket]
 
       this.state.acceptWebSocket(server)
+      server.serializeAttachment({ authed: true } satisfies WsAttachment)
 
-      // Auth timeout: close if not authenticated within 10s
-      const timeoutId = setTimeout(() => {
-        const att = server.deserializeAttachment() as WsAttachment | null
-        if (!att?.authed) {
-          this.send(server, { type: 'auth:fail' })
-          server.close(4001, 'Auth timeout')
-        }
-      }, 10_000) as unknown as number
-      server.serializeAttachment({ authed: false, timeoutId } satisfies WsAttachment)
-
-      return new Response(null, { status: 101, webSocket: client })
+      const offered = request.headers.get('Sec-WebSocket-Protocol')
+      return new Response(null, {
+        status: 101, webSocket: client,
+        headers: offered ? { 'Sec-WebSocket-Protocol': WS_PROTOCOL } : {},
+      })
     }
 
-    // Internal HTTP API for the MCP server (cadence changes re-arm the alarm).
+    // Internal HTTP API, reachable only through the worker (cron re-arming the
+    // alarm, the MCP server running a tool for this user).
     if (request.method === 'POST' && url.pathname === '/api/sync-alarm') {
       await this.syncAlarm()
       return Response.json({ ok: true })
+    }
+    if (request.method === 'POST' && url.pathname === '/api/tool') {
+      const { name, args } = await request.json() as { name: string; args: Record<string, unknown> }
+      return Response.json(await runCadenceTool(this.env, name, args ?? {}, () => this.syncAlarm()))
     }
 
     return new Response('Not found', { status: 404 })
@@ -108,11 +126,10 @@ export class AngelDO implements DurableObject {
     const att = ws.deserializeAttachment() as WsAttachment | null
 
     // Handle auth
+    // The socket was authenticated at upgrade; this message is the client's
+    // cue for the initial state.
     if (msg.type === 'auth') {
-      if (msg.pin === this.env.PIN) {
-        if (att?.timeoutId) clearTimeout(att.timeoutId)
-        ws.serializeAttachment({ authed: true } satisfies WsAttachment)
-
+      if (att?.authed) {
         const snapshots: StreamSnapshot[] = []
         for (const [, stream] of this.activeStreams) {
           snapshots.push({
@@ -130,7 +147,7 @@ export class AngelDO implements DurableObject {
         })
       } else {
         this.send(ws, { type: 'auth:fail' })
-        ws.close(4001, 'Bad PIN')
+        ws.close(4001, 'Not authenticated')
       }
       return
     }
@@ -182,6 +199,26 @@ export class AngelDO implements DurableObject {
 
   webSocketError(ws: WebSocket, error: unknown) {
     ws.close(1011, 'WebSocket error')
+  }
+
+  // First contact for a user: remember who this DO is, and for the owner pull in
+  // the pre-multi-user data from D1. Memoised per instance; a failed import
+  // clears the memo so the next connect resumes it.
+  private init(sub: string, owner: boolean): Promise<void> {
+    this.initialized ??= (async () => {
+      if ((await this.state.storage.get('sub')) !== sub) await this.state.storage.put('sub', sub)
+      if (owner && !(await this.state.storage.get('legacy_imported'))) {
+        const sql = this.state.storage.sql
+        await importLegacy(
+          this.sharedEnv.DB, sql, fn => this.state.storage.transactionSync(fn),
+          () => (this.state.storage.kv.get('legacy_import') as { done: string[]; wiped: boolean } | undefined) ?? null,
+          p => this.state.storage.kv.put('legacy_import', p),
+        )
+        await this.state.storage.put('legacy_imported', true)
+        await this.syncAlarm() // wake-ups that came across need their alarm
+      }
+    })().catch(e => { this.initialized = null; throw e })
+    return this.initialized
   }
 
   // --- Handlers ---

@@ -1,3 +1,5 @@
+import { login } from './login'
+import type { LoginUser } from '$shared/lib/finereli-login'
 import type {
   ClientMsg, ServerMsg, MessageRow, StreamSnapshot, StreamPart, AgentInfo, ConversationInfo,
 } from '../../worker/types'
@@ -28,8 +30,6 @@ export interface DocAdded {
 }
 type DocListener = (d: DocAdded) => void
 
-const PIN_KEY = 'angel.pin.v1'
-
 let nextMsgKey = -1
 
 // A locally-constructed message row (optimistic user echo, or an assistant reply
@@ -54,11 +54,16 @@ function localMessage(
 }
 
 // The one WebSocket client. State is rune-based, so components read `angel.x`
-// directly and re-render; there is no subscribe() layer. The PIN is the
-// credential (kit pin-auth convention): stored raw, replayed on every connect,
-// cleared when the server rejects it.
+// directly and re-render; there is no subscribe() layer. The credential is the
+// login.finereli.com token: offered on every connect (as a WebSocket
+// subprotocol, since browsers can't set headers), dropped when the server says
+// it's dead.
 class AngelClient {
-  pin = $state<string | null>(null)
+  user = $state<LoginUser | null>(null)
+  // Signed in with Google but not on the allow-list: the email, to say so.
+  denied = $state<string | null>(null)
+  // Local dev only: the worker's DEV_AUTH bypass answered /api/me, no token needed.
+  devSession = $state(false)
   connState = $state<ConnState>('disconnected')
   agent = $state<AgentInfo | null>(null)
   agentLoaded = $state(false)
@@ -74,8 +79,7 @@ class AngelClient {
   #pongTimeout: ReturnType<typeof setTimeout> | null = null
   #pendingSend: { conversationId: string; content: string; clientMsgId: string } | null = null
   #loadedConversations = new Set<string>()
-  #pinResolve: ((ok: boolean) => void) | null = null
-  #candidatePin: string | null = null
+  #opened = false // the socket got past the upgrade (the worker accepted the token)
   #createResolve: ((id: string) => void) | null = null
 
   constructor() {
@@ -96,42 +100,40 @@ class AngelClient {
     }
   }
 
-  get signedIn(): boolean { return this.pin !== null }
+  get signedIn(): boolean { return this.user !== null || this.devSession }
 
   get mainConversationId(): string | null { return this.agent?.conversationId ?? null }
 
-  // Optimistic boot: a stored PIN shows the app immediately; the first
-  // auth:fail clears it and drops back to the keypad.
-  boot() {
-    const saved = localStorage.getItem(PIN_KEY)
-    if (saved) {
-      this.pin = saved
-      this.doConnect()
+  // Optimistic boot: a stored token shows the app immediately; a 401 on the
+  // first connect drops back to the sign-in screen.
+  async boot() {
+    login.onChange((u) => {
+      this.user = u
+      if (u) { this.denied = null; this.doConnect() } else this.reset()
+    })
+    await login.handleRedirect()
+    this.user = login.user
+    if (login.token) this.doConnect()
+    else if (location.hostname === 'localhost') {
+      const res = await fetch('/api/me').catch(() => null)
+      if (res?.ok) { this.devSession = true; this.doConnect() }
     }
   }
 
-  // PIN keypad submit: connect and resolve true only once the server accepts.
-  // The candidate is not promoted to `pin` until auth:ok, so the keypad stays
-  // mounted (and can shake) while the check is in flight.
-  submit(pin: string): Promise<boolean> {
-    this.#candidatePin = pin
-    return new Promise((resolve) => {
-      this.#pinResolve = resolve
-      this.doConnect()
-      setTimeout(() => {
-        if (this.#pinResolve === resolve) {
-          this.#pinResolve = null
-          this.#candidatePin = null
-          resolve(false)
-        }
-      }, 8000)
-    })
-  }
+  signIn() { return login.signIn() }
 
   signOut() {
-    localStorage.removeItem(PIN_KEY)
+    if (this.devSession) { this.devSession = false; this.reset() } else login.signOut()
+  }
+
+  // Everything held belongs to whoever was signed in; drop it all.
+  private reset() {
     this.disconnect()
-    this.pin = null
+    this.agent = null
+    this.agentLoaded = false
+    this.convStates = {}
+    this.conversations = []
+    this.denied = null
   }
 
   getConvState(id: string): ConversationState {
@@ -186,11 +188,14 @@ class AngelClient {
     this.connState = 'connecting'
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    this.#ws = new WebSocket(`${proto}//${location.host}/ws`)
+    const token = login.token
+    this.#opened = false
+    this.#ws = new WebSocket(`${proto}//${location.host}/ws`, token ? ['angel.v1', `auth.${token}`] : undefined)
 
     this.#ws.onopen = () => {
+      this.#opened = true
       this.connState = 'authenticating'
-      this.send({ type: 'auth', pin: this.pin ?? this.#candidatePin ?? '' })
+      this.send({ type: 'auth' })
     }
 
     this.#ws.onmessage = (event) => {
@@ -202,6 +207,8 @@ class AngelClient {
     this.#ws.onclose = () => {
       this.stopPing()
       this.#loadedConversations.clear()
+      // Refused at the upgrade: find out whether the sign-in is dead or just the network.
+      if (!this.#opened) void this.probe()
       if (this.connState !== 'disconnected') {
         this.connState = 'reconnecting'
         this.clearReconnectTimer()
@@ -217,6 +224,23 @@ class AngelClient {
     this.#ws.onerror = () => {}
   }
 
+  // A socket that never opened: 401 means the token is dead (sign in again),
+  // 403 that this account isn't allowed in. Anything else is the network, and
+  // the reconnect loop carries on.
+  private async probe() {
+    const token = login.token
+    const res = await fetch('/api/me', { headers: token ? { Authorization: `Bearer ${token}` } : {} }).catch(() => null)
+    if (res?.status === 401) {
+      this.devSession = false
+      login.handleUnauthorized()
+      if (!login.user) this.reset()
+    } else if (res?.status === 403) {
+      const body = await res.json().catch(() => ({})) as { email?: string }
+      this.disconnect()
+      this.denied = body.email ?? ''
+    }
+  }
+
   private handleMessage(msg: ServerMsg) {
     switch (msg.type) {
       case 'auth:ok': {
@@ -225,16 +249,6 @@ class AngelClient {
         this.startPing()
         this.agent = msg.agent
         this.agentLoaded = true
-        if (this.#candidatePin) {
-          this.pin = this.#candidatePin
-          this.#candidatePin = null
-        }
-        if (this.pin) localStorage.setItem(PIN_KEY, this.pin)
-        if (this.#pinResolve) {
-          const resolve = this.#pinResolve
-          this.#pinResolve = null
-          resolve(true)
-        }
         const activeIds = new Set(msg.activeStreams.map(s => s.conversationId))
         const pendingIds = new Set(msg.pendingTurns || [])
         for (const snapshot of msg.activeStreams) {
@@ -282,14 +296,7 @@ class AngelClient {
 
       case 'auth:fail': {
         this.connState = 'disconnected'
-        localStorage.removeItem(PIN_KEY)
-        this.pin = null
-        this.#candidatePin = null
-        if (this.#pinResolve) {
-          const resolve = this.#pinResolve
-          this.#pinResolve = null
-          resolve(false)
-        }
+        login.handleUnauthorized()
         break
       }
 
@@ -557,7 +564,7 @@ class AngelClient {
   }
 
   private handleOnline() {
-    if (this.pin && this.connState !== 'connected' && this.connState !== 'connecting' && this.connState !== 'authenticating') {
+    if (this.signedIn && !this.denied && this.connState !== 'connected' && this.connState !== 'connecting' && this.connState !== 'authenticating') {
       this.clearReconnectTimer()
       this.#reconnectDelay = 1000
       this.doConnect()

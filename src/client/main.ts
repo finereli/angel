@@ -9,7 +9,7 @@ import { angel } from './lib/streamManager.svelte'
 // would hurt - while a reply is streaming.
 updates.init({ canReload: () => !Object.values(angel.convStates).some(c => c.streamState === 'streaming') })
 
-// Optimistic boot: a stored PIN shows the app while it re-validates.
+// Optimistic boot: a stored token shows the app while it re-validates.
 angel.boot()
 
 export default mount(App, { target: document.getElementById('app')! })

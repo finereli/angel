@@ -1,10 +1,16 @@
 export interface Env {
+  // Shared control plane (users, MCP). A user's own data is in their Durable
+  // Object; inside the DO this same name points at that private database.
   DB: D1Database
   AI: Ai
   ASSETS: Fetcher
   ANGEL_DO: DurableObjectNamespace
+  // Legacy: signs the MCP OAuth tokens until MCP moves to login.finereli.com.
   PIN: string
   OPENROUTER_API_KEY: string
+  OWNER_EMAIL: string
+  ALLOWED_EMAILS?: string
+  DEV_AUTH?: string
   DEEPSEEK_MODEL?: string
 }
 
@@ -184,7 +190,7 @@ export interface AgentInfo {
 }
 
 export type ClientMsg =
-  | { type: 'auth'; pin: string }
+  | { type: 'auth' }
   | { type: 'ping'; ts: number }
   | { type: 'conv:load'; conversationId: string }
   | { type: 'conv:list' }

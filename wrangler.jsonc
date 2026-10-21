@@ -6,6 +6,10 @@
   "compatibility_flags": ["nodejs_compat"],
   "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"] }],
   "observability": { "enabled": true },
+  "vars": {
+    "OWNER_EMAIL": "eli.finer@gmail.com",
+    "ALLOWED_EMAILS": ""
+  },
   "routes": [{ "pattern": "angel.finereli.com", "custom_domain": true }],
   "assets": {
     "directory": "./dist/client",

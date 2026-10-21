@@ -7,7 +7,7 @@
   import Toast from '$shared/ui/Toast.svelte'
   import ResetButton from '$shared/ui/ResetButton.svelte'
   import InstallBanner from '$shared/ui/InstallBanner.svelte'
-  import PinLogin from '$shared/ui/PinLogin.svelte'
+  import LoginScreen from '$shared/ui/LoginScreen.svelte'
   import Chat from './pages/Chat.svelte'
   import Settings from './pages/Settings.svelte'
   import { angel } from './lib/streamManager.svelte'
@@ -53,8 +53,15 @@
   })
 </script>
 
-{#if !angel.signedIn}
-  <PinLogin auth={angel} />
+{#if !angel.signedIn || angel.denied !== null}
+  <LoginScreen
+    auth={angel}
+    title="Angel"
+    subtitle="A COMPANION WITH A MEMORY"
+    icon="/icon-192.png"
+    denied={angel.denied !== null}
+    deniedText={`${angel.denied || 'This account'} is not on the list yet.`}
+  />
 {:else}
   <div class="shell">
     <TopBar leading="menu" {title} onleading={() => (menuOpen = true)} />

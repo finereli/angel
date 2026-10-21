@@ -9,17 +9,44 @@ import {
   oauthToken,
 } from './oauth'
 import { mcpHandler } from './mcp'
+import { identify, isAllowed, offersAngelProtocol, type Caller } from './access'
 
 export { AngelDO } from './durable-object'
 
 type AppContext = { Bindings: Env }
 const app = new Hono<AppContext>()
 
-// WebSocket upgrade → Durable Object
+const userStub = (env: Env, sub: string) => env.ANGEL_DO.get(env.ANGEL_DO.idFromName(sub))
+
+// Remember who signed in. The cron walks this table to re-arm every user's alarm.
+async function noteUser(env: Env, who: Caller) {
+  await env.DB.prepare(
+    `INSERT INTO users (sub, email, name) VALUES (?, ?, ?)
+     ON CONFLICT(sub) DO UPDATE SET email = excluded.email, name = excluded.name, last_seen = datetime('now')`
+  ).bind(who.sub, who.email, who.name).run()
+}
+
+// Who am I: the client's probe after a failed connect, to tell a dead sign-in
+// (401: sign in again) from a signed-in account that isn't allowed (403).
+app.get('/api/me', async (c) => {
+  const who = await identify(c.env, c.req.raw)
+  if (!who) return c.json({ error: 'unauthorized' }, 401)
+  if (!isAllowed(c.env, who.email)) return c.json({ error: 'not_allowed', email: who.email }, 403)
+  return c.json({ email: who.email, name: who.name })
+})
+
+// WebSocket upgrade: verify the login token here, then hand the socket to that
+// user's own Durable Object. The DO trusts X-Angel-* because only this route sets them.
 app.get('/ws', async (c) => {
-  const id = c.env.ANGEL_DO.idFromName('angel')
-  const stub = c.env.ANGEL_DO.get(id)
-  return stub.fetch(c.req.raw)
+  const who = await identify(c.env, c.req.raw)
+  if (!who) return c.text('Unauthorized', 401)
+  if (!isAllowed(c.env, who.email)) return c.text('Not allowed', 403)
+  await noteUser(c.env, who)
+  const headers = new Headers(c.req.raw.headers)
+  headers.set('X-Angel-Sub', who.sub)
+  headers.set('X-Angel-Owner', who.owner ? '1' : '0')
+  if (!offersAngelProtocol(c.req.raw)) headers.delete('Sec-WebSocket-Protocol')
+  return userStub(c.env, who.sub).fetch(new Request(c.req.raw, { headers }))
 })
 
 // Health check (no auth)
@@ -46,17 +73,16 @@ app.post('/oauth/token', oauthToken)
 // MCP (Streamable HTTP)
 app.post('/mcp', mcpHandler)
 
-function doStub(env: Env) {
-  return env.ANGEL_DO.get(env.ANGEL_DO.idFromName('angel'))
-}
-
 export default {
   fetch: app.fetch,
-  // The DO owns the wake-up alarm; the cron is a safety net that re-arms it if
-  // the DO was evicted with no alarm pending.
+  // Each user's DO owns its wake-up alarm; the cron is a safety net that re-arms
+  // any alarm lost to an eviction.
   scheduled: async (_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) => {
-    await doStub(env)
-      .fetch(new Request('http://do/api/sync-alarm', { method: 'POST' }))
-      .catch(() => {})
+    const users = await env.DB.prepare(`SELECT sub FROM users`).all<{ sub: string }>()
+    await Promise.all(users.results.map(u =>
+      userStub(env, u.sub)
+        .fetch(new Request('http://do/api/sync-alarm', { method: 'POST' }))
+        .catch(() => {})
+    ))
   },
 }

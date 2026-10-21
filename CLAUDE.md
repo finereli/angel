@@ -7,10 +7,12 @@ This is a baseline to fork. It carries the harness — memory pyramids, tools, a
 ## Architecture
 
 - **Worker** (`src/worker/`): Hono-based Cloudflare Worker. Routes in `index.ts` — the SPA, health, OAuth, and MCP. That's the whole surface.
-- **Durable Object** (`src/worker/durable-object.ts`): a single `AngelDO` instance owns all WebSocket connections, agent execution, and alarm-driven wakeups. It serializes everything: one response at a time, memory work on its own chain.
-- **D1** (`migrations/`): SQLite for agents, conversations, messages, observations and their summary pyramid, stream summaries, tags, lists, documents, wakeups, saved scripts, logs, and a small kv table. `0001_init.sql` is the consolidated baseline; later migrations are incremental.
-- **Client** (`src/client/`): Svelte 5 SPA, runes throughout. The shell is the pwa skill's kit - `TopBar` + `Drawer` + a hash router - with Angel's own views: `pages/Chat.svelte` (the one conversation) and `pages/Settings.svelte` (model + thinking effort). Stream management in `lib/streamManager.svelte.ts` (rune state, PIN auth). Markdown rendering + DOMPurify in `util.ts`. Vendored kit code lives in `shared/` and imports as `$shared/*` (base.css, build helper, router/theme/toast/format/updates/ws-client, and the shared UI components).
-- **MCP server** (`src/worker/mcp.ts`): JSON-RPC 2.0 at `POST /mcp` with OAuth (HMAC tokens signed with the PIN). Exposes `get_cadence` and `set_cadence` so an external agent can check and adjust the agent's heartbeat.
+- **Durable Object** (`src/worker/durable-object.ts`): one `AngelDO` per user (`idFromName(sub)`, the Google account id) owns that user's WebSocket connections, agent execution, and alarm-driven wakeups. It serializes everything: one response at a time, memory work on its own chain.
+- **Per-user storage** (`src/worker/user-db.ts`, `user-schema.ts`): each DO has a private SQLite database (agents, conversations, messages, observations and their summary pyramid, stream summaries, tags, lists, documents, wakeups, saved scripts, logs, kv). `user-db.ts` wraps it in the slice of the D1 API the worker uses and the DO hands it to everything as `env.DB`, so query code is unchanged. Schema changes are new steps appended to `USER_SCHEMA`, applied in the DO constructor. Never edit a shipped step. `wrangler d1 execute` cannot see this data; use the MCP `health_check` tool, or build a diagnostic into the DO.
+- **D1** (`migrations/`): the shared control plane only - the `users` table (the cron walks it to re-arm every DO's alarm; MCP finds the owner through it). `0001`-`0003` are the pre-multi-user tables, kept as the one-time import source for the owner (`legacy-import.ts`) and due to be dropped by a later migration once the import is trusted.
+- **Client** (`src/client/`): Svelte 5 SPA, runes throughout. The shell is the pwa skill's kit - `TopBar` + `Drawer` + a hash router - with Angel's own views: `pages/Chat.svelte` (the one conversation) and `pages/Settings.svelte` (model + thinking effort). Stream management in `lib/streamManager.svelte.ts` (rune state, login token auth). Markdown rendering + DOMPurify in `util.ts`. Vendored kit code lives in `shared/` and imports as `$shared/*` (base.css, build helper, router/theme/toast/format/updates/ws-client, and the shared UI components).
+- **Sign-in** (`src/worker/access.ts`, `shared/lib/finereli-login.ts`, `shared/functions/verify-login.ts`): login.finereli.com (Google). The client gets a token in a popup; the worker verifies it (`aud` must be this app's origin) on `/ws` and `/api/me`, then forwards the socket to that user's DO with `X-Angel-Sub`. The browser offers the token as a WebSocket subprotocol (`['angel.v1', 'auth.<token>']`). Login only says who someone is: `ALLOWED_EMAILS` (plus `OWNER_EMAIL`) says who may use Angel, because every user still runs on the owner's OpenRouter key. `shared/functions/verify-login.ts` has two `!` added for our stricter tsconfig; fix upstream in finereli-login.
+- **MCP server** (`src/worker/mcp.ts`): JSON-RPC 2.0 at `POST /mcp`. Still the old PIN-signed OAuth (`oauth.ts`), and it only speaks for the owner: tools run inside the owner's DO through `POST /api/tool` (`cadence-tools.ts`). Exposes `get_cadence`, `set_cadence` and `health_check`. To be replaced by the kit's `mcp` item (login.finereli.com approval, per-user).
 - **Agent tools** (`src/worker/tools/`): tool definitions and handlers registered via `registry.ts`. Each file exports a tool array: memory, lists, documents, web, util, random, budget, wakeup/cadence, code (QuickJS REPL).
 
 ## The agent inside vs. the agent outside
@@ -21,7 +23,7 @@ This Claude Code session is the support agent outside it. It modifies the codeba
 
 ## MCP API access
 
-To check or change the cadence from this session:
+To check or change the owner's cadence, or run the health check, from this session (the owner must have signed in once, so a `users` row exists). The PIN is the `PIN` Worker secret, now used only for MCP tokens:
 
 ```bash
 # Generate a token
@@ -29,7 +31,7 @@ TOKEN=$(node -e "
 const crypto = require('crypto');
 const payload = JSON.stringify({ type: 'access', client_id: 'claude-session', exp: Math.floor(Date.now() / 1000) + 7 * 86400 });
 const data = Buffer.from(payload).toString('base64url');
-const sig = crypto.createHmac('sha256', process.env.PIN || '3041').update(data).digest();
+const sig = crypto.createHmac('sha256', process.env.PIN).update(data).digest();
 console.log(data + '.' + Buffer.from(sig).toString('base64url'));
 ")
 
@@ -39,28 +41,22 @@ curl -s -X POST https://angel.finereli.com/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_cadence","arguments":{}}}'
 ```
 
-Available MCP tools: `get_cadence`, `set_cadence`.
+Available MCP tools: `get_cadence`, `set_cadence`, `health_check`.
 
 ## Health checks
 
 An agent can't recover from a technical failure by itself. A cadence timer firing on schedule proves nothing — it can fire every time while the agent silently fails every wake-up. Check that real output is coming out.
 
 1. **Cadence is running**: `get_cadence` via MCP.
-2. **Recent output exists**: the agent's latest assistant message. If nothing in several cadence cycles, something is wrong.
-   ```
-   npx wrangler d1 execute angel-db --remote --command "SELECT created_at, substr(content, 1, 120) AS preview FROM messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 5"
-   ```
-3. **Tool calls are completing**: tool activity lives in the `parts` JSON column of assistant messages, not as separate `role='tool'` rows.
-   ```
-   npx wrangler d1 execute angel-db --remote --command "SELECT id, created_at, CASE WHEN parts LIKE '%\"type\":\"tool\"%' THEN 'YES' ELSE 'no' END AS has_tools, substr(content, 1, 100) AS preview FROM messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 15"
-   ```
-4. **No silent errors**: `agent_logs` records stream start/done/reset/abort/error with detail. Also watch for empty assistant messages, repeated identical replies, or the agent saying it will do something and never doing it.
+2. **Recent output exists, tools complete, no silent errors**: `health_check` via MCP returns the latest assistant messages (with whether each used tools) and recent warnings and errors from `agent_logs`. If nothing in several cadence cycles, something is wrong. Also watch for empty assistant messages, repeated identical replies, or the agent saying it will do something and never doing it.
+
+(The data is in the owner's Durable Object, so the old `wrangler d1 execute ... FROM messages` queries no longer see it.)
 
 If the agent is broken, diagnose the root cause (model compatibility, tool parsing, token limits), fix it, deploy, and verify — don't just note it.
 
 ## Cadence system
 
-The `agents` table holds a persistent `cadence_minutes`. The DO alarm handler auto-schedules the next wakeup *before* running the agent, so a failed wake-up can't end the heartbeat. `syncAlarm()` also bootstraps any agent that has a cadence but no scheduled wakeup, and a 5-minute cron pokes the DO to re-arm the alarm if it was evicted. Cadence is unset by default on a fresh database — `set_cadence` turns it on.
+The `agents` table holds a persistent `cadence_minutes`. The DO alarm handler auto-schedules the next wakeup *before* running the agent, so a failed wake-up can't end the heartbeat. `syncAlarm()` also bootstraps any agent that has a cadence but no scheduled wakeup, and a 5-minute cron pokes every user's DO (from the D1 `users` table) to re-arm the alarm if it was evicted. Cadence is unset by default on a fresh database — `set_cadence` turns it on.
 
 ## Dev commands
 
@@ -70,18 +66,19 @@ npm run build            # svelte-check + tests + vite build
 npm run check            # svelte-check only
 npm run deploy           # build + wrangler deploy
 npm run typecheck        # tsc --noEmit (worker; also runs in the pre-push hook)
-npm test                 # unit tests (DSML parser)
+npm test                 # unit tests (DSML parser, per-user DB, legacy import, access)
 npm run icon <name>      # extract a Material Symbols glyph into shared/lib/icons.ts
-npx wrangler d1 migrations apply angel-db --local   # or --remote
+npx wrangler d1 migrations apply angel-db --local   # or --remote (control plane only)
 npx wrangler d1 execute angel-db --remote --command "SQL"
 ```
 
 ## Deploying
 
 1. `npm install --legacy-peer-deps` — plain `npm install`/`npm ci` fails on a peerOptional conflict between the locked wrangler and `@cloudflare/workers-types`. This also installs the pre-push hook (`prepare` points `core.hooksPath` at `.githooks`).
-2. `npm run deploy` builds and runs `wrangler deploy`. No Docker. Apply D1 migrations first with `npm run db:migrate:remote`.
-3. The first deploy after the container removal also applies DO migration `v3`, which deletes the retired `Sandbox` class.
-4. Verify with the health checks above; `npx wrangler tail` for live errors.
+2. `npm run db:migrate:remote` (the D1 `users` table), then `npm run deploy` (build + `wrangler deploy`). No Docker. DO migration `v3` deletes the retired `Sandbox` class.
+3. **First deploy of per-user DOs:** the owner's existing data moves from D1 into their own DO the first time they sign in (`legacy-import.ts`; resumable, one-time). Until then wake-ups are paused, because no DO knows it owns the old data. Sign in as `OWNER_EMAIL` right after deploying, then run `health_check`.
+4. Local dev: put `DEV_AUTH=allow`, `ALLOWED_EMAILS=dev@localhost` and a real `OPENROUTER_API_KEY` in `.dev.vars` (gitignored), and run `wrangler dev --local-upstream localhost:8787` - without the upstream flag the custom-domain route makes `request.url` the production host and the bypass (which requires `localhost`) stays off. Set `OWNER_EMAIL=dev@localhost` there too to exercise the legacy import against local D1.
+5. Verify with the health checks above; `npx wrangler tail` for live errors.
 
 The pre-push hook runs `tsc --noEmit` + the vite build and blocks on failure (`--no-verify` bypasses). Keep the repo tsc-clean.
 
@@ -89,11 +86,13 @@ The pre-push hook runs `tsc --noEmit` + the vite build and blocks on failure (`-
 
 | Secret | What it is |
 |--------|-----------|
-| `PIN` | The password. Signs the HMAC tokens for OAuth/MCP and gates the WebSocket. |
-| `OPENROUTER_API_KEY` | OpenRouter key. |
+| `PIN` | Signs the HMAC tokens for the legacy MCP OAuth only. The WebSocket no longer uses it. The old default PIN is in git history, so use a fresh one. Goes away with the kit's `mcp` item. |
+| `OPENROUTER_API_KEY` | OpenRouter key, shared by every user until BYOK. |
 | `DEEPSEEK_MODEL` | Optional model override (see `src/worker/config.ts` / `llm.ts`). |
 
 Set with `npx wrangler secret put <NAME>`.
+
+Plain vars in `wrangler.jsonc`: `OWNER_EMAIL` (the account that owns the legacy data and can use MCP) and `ALLOWED_EMAILS` (comma-separated; who else may sign in - empty means only the owner).
 
 ## Roadmap
 
@@ -111,7 +110,7 @@ Set with `npx wrangler secret put <NAME>`.
 ### Direction
 - A simple agent that connects to MCP servers and has a little code ability beats a mega bot that builds software on demand. The workspace container was removed for that reason; software building can come back later as an MCP server.
 - **MCP client** — let Angel connect to external MCP servers. Not built yet.
-- **Multi-user, open source, BYOK** — finereli-login (Google) replacing the PIN, one Durable Object per user (keyed by `sub`) with its own SQLite storage, and a per-user OpenRouter key. The kit's `mcp` item replaces the hand-rolled OAuth.
+- **Multi-user, open source, BYOK** — sign-in (finereli-login) and one Durable Object per user with its own SQLite are done. Still to do: a per-user OpenRouter key (then open sign-up instead of `ALLOWED_EMAILS`), per-user embeddings cost, and the kit's `mcp` item replacing the hand-rolled OAuth. Then drop the legacy D1 tables.
 - **Encryption at rest** — later, after multi-user. finereli-login can hand each user a stable data key (`{code, key: true}` on `/exchange`, HKDF of a service secret), the way whatsapp-mcp does it. It protects a leaked database, not the operator. Tradeoff to expect: no background work (cadence wake-ups) when nobody is signed in, since nothing can decrypt, unless the key is also stored wrapped by a server secret.
 
 ## Key conventions
@@ -122,5 +121,5 @@ Set with `npx wrangler secret put <NAME>`.
 - **Memory is pyramidal**: stream pyramid for recency, observation pyramid for tagged recall. Both run in the background after the reply.
 - **One agent, one conversation**: the `agents` and `conversations` tables stay generic (nothing hardcodes a single row), but the UI routes straight to the one conversation and there is no switcher.
 - **LLM**: DeepSeek and Qwen via OpenRouter (catalog in `src/worker/models.ts`) (`src/worker/llm.ts`, `src/worker/config.ts`).
-- **Auth**: PIN-based HMAC tokens (`src/worker/oauth.ts`). PIN is in Worker secrets.
+- **Auth**: login.finereli.com tokens (`src/worker/access.ts`), checked at the worker, never in the DO. The PIN only signs legacy MCP tokens.
 - **Deploy target**: `angel.finereli.com` (Cloudflare custom domain).
