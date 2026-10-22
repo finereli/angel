@@ -19,10 +19,15 @@ export const MODEL_CATALOG: ModelOption[] = [
   { id: 'deepseek/deepseek-v4.1-flash-1017', label: 'DeepSeek V4.1 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.15, priceOutPerM: 0.60 },
   { id: 'qwen/qwen3.8-flash', label: 'Qwen3.8 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.15, priceOutPerM: 0.47 },
   { id: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5', tier: 'flash', reasoning: true, priceInPerM: 0.10, priceOutPerM: 0.50 },
+  { id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.825, priceOutPerM: 4.125 },
+  { id: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash', tier: 'flash', reasoning: true, priceInPerM: 0.0052, priceOutPerM: 0.1985 },
+  { id: 'openai/gpt-6-luna', label: 'GPT-6 Luna', tier: 'flash', reasoning: true, priceInPerM: 0.10, priceOutPerM: 0.50 },
 ]
 
-// Hand-picked, not a leaderboard: the latest flash model from DeepSeek and from
-// Qwen, and Haiku, which makes a good companion. Used until someone picks a model, and for anyone whose saved model has since
+// Hand-picked, not a leaderboard: the latest flash model from DeepSeek, Qwen,
+// Google, Z.ai and OpenAI, and Haiku, which makes a good companion. Each one
+// passed a tool-call round trip without reasoning_details replayed, which is
+// how the agent loop sends history. The first is the default. Used until someone picks a model, and for anyone whose saved model has since
 // left the catalog. A constant in code, not server config: there is no env knob.
 export const DEFAULT_MODEL = MODEL_CATALOG[0]!.id
 

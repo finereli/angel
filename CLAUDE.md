@@ -18,7 +18,7 @@ This is a baseline to fork. It carries the harness — memory pyramids, tools, a
 
 ## The agent inside vs. the agent outside
 
-Angel runs inside the system, via OpenRouter (DeepSeek by default; Qwen and Haiku selectable in Settings). He has a persistent memory pyramid and wakes up on a cadence. He cannot modify the codebase.
+Angel runs inside the system, via OpenRouter (DeepSeek by default; the rest of the catalog selectable in Settings). He has a persistent memory pyramid and wakes up on a cadence. He cannot modify the codebase.
 
 This Claude Code session is the support agent outside it. It modifies the codebase, deploys, runs migrations, and checks health. The separation is deliberate: the agent who lives in the system can't break it, and the agent who can modify it runs independently.
 
@@ -131,7 +131,7 @@ Removing someone stops new connections, not one already open.
 - **Changing models is staged**: Settings shows the warning and an explicit Switch button when the setup has any history (`AgentInfo.hasHistory`); an empty setup applies at once.
 - **Memory is pyramidal**: stream pyramid for recency, observation pyramid for tagged recall. Both run in the background after the reply.
 - **One agent, one main conversation**: the `agents` and `conversations` tables stay generic (nothing hardcodes a single row). The UI opens on the main line; side chats (`parent_id` set) hang off it in the sidebar. A side chat starts untitled, gets a few-word title from its first exchange (`titleSideChat`, falling back to its start date), and can be renamed or deleted. The main line can be neither.
-- **LLM**: OpenRouter, through a hand-picked three-model catalog in `src/worker/models.ts` (DeepSeek V4.1 Flash, Qwen3.8 Flash, Claude Haiku 5.5). No server-side model config: the default is `DEFAULT_MODEL` in code, and a saved model that leaves the catalog falls back to it.
+- **LLM**: OpenRouter, through a hand-picked catalog in `src/worker/models.ts` (DeepSeek V4.1 Flash, Qwen3.8 Flash, Claude Haiku 5.5, Gemini 3.8 Flash, GLM 5.3 Flash, GPT-6 Luna). No server-side model config: the default is `DEFAULT_MODEL` in code, and a saved model that leaves the catalog falls back to it.
 - **Errors are for people**: `llm.ts` turns provider failures into plain sentences (`LlmError`, `friendlyError`); the raw text goes to `agent_logs`. Non-retryable ones (bad key, no credit) fail fast; rate limits retry with backoff. An error is never written into the stream (the model would read it as its own words); it is kept per conversation, sent with `conv:messages`, and the chat shows it with Try again (`retry`). (`src/worker/llm.ts`, `src/worker/config.ts`).
 - **Auth**: login.finereli.com tokens (`src/worker/access.ts`), checked at the worker, never in the DO. The PIN only signs legacy MCP tokens.
 - **Deploy target**: `angel.finereli.com` (Cloudflare custom domain).

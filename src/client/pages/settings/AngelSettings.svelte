@@ -9,7 +9,8 @@
   const reasoningSupported = $derived(modelSupportsReasoning(selectedModel))
   const loaded = $derived(angel.agentLoaded)
 
-  const price = (n: number) => `$${n.toFixed(2)}`
+  // Sub-cent prices (GLM's input) keep a third digit instead of rounding to $0.01.
+  const price = (n: number) => `$${n.toFixed(n < 0.01 ? 3 : 2)}`
 
   function chooseModel(id: string) {
     angel.updateSettings(id, modelSupportsReasoning(id) ? selectedEffort : null)

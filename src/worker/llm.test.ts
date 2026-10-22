@@ -44,9 +44,10 @@ describe('model choice', () => {
     expect(resolveModel('qwen/qwen3.8-flash')).toBe('qwen/qwen3.8-flash')
   })
 
-  it('offers exactly the hand-picked three', () => {
+  it('offers exactly the hand-picked six', () => {
     expect(MODEL_CATALOG.map(m => m.id)).toEqual([
       'deepseek/deepseek-v4.1-flash-1017', 'qwen/qwen3.8-flash', 'anthropic/claude-haiku-5.5',
+      'google/gemini-3.8-flash', 'z-ai/glm-5.3-flash', 'openai/gpt-6-luna',
     ])
   })
 })
