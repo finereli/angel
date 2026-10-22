@@ -175,8 +175,11 @@
     return { files, docs, text };
   }
 
+  // A phone or tablet, judged by its primary pointer, not by window width or
+  // touch support: a narrow desktop window or a touchscreen laptop still has a
+  // keyboard, so Enter sends there.
   function isMobile(): boolean {
-    return window.matchMedia('(max-width: 1024px)').matches || 'ontouchstart' in window;
+    return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
   }
 
   function formatElapsed(seconds: number): string {
@@ -262,6 +265,7 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    if (e.isComposing) return; // Enter that confirms an IME candidate is not a send
     if (e.key === 'Enter' && e.altKey && !isMobile()) {
       e.preventDefault();
       const ta = e.target as HTMLTextAreaElement;
