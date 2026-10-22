@@ -169,9 +169,15 @@
     text-align: center;
   }
 
+  /* Local change: the same height as the brand band, so top and bottom match. */
   .footer {
     margin-top: auto;
-    padding: 12px var(--gutter);
+    flex-shrink: 0;
+    height: calc(var(--topbar-h) + var(--safe-bottom));
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 var(--gutter) var(--safe-bottom);
     border-top: 1px solid var(--border);
   }
 </style>
