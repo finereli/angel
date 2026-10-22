@@ -1,4 +1,4 @@
-<!-- pwa-kit: shell/ui/Drawer.svelte v6 -->
+<!-- pwa-kit: shell/ui/Drawer.svelte v7 -->
 <script lang="ts">
   import type { Snippet } from 'svelte'
   // Slide-in navigation drawer that becomes a permanent sidebar on desktop
@@ -9,12 +9,14 @@
   // Props: open, onclose, entries [{ label, hash, current, count? }] for a
   // flat list, or groups [{ title?, entries }] for titled sections (an admin
   // with פרסום / תוכן / אנשים); `count` draws a small badge. brand snippet
-  // (logo + name), footer snippet (user row, sign-out, build line with
-  // ResetButton). Seams: closeLabel, width.
+  // (logo + name), footer snippet: one row, the same height as the brand band -
+  // AccountMenu (avatar + name, opens Sign out and friends) on the start side,
+  // icon buttons on the end (ResetButton, light/dark, settings). Seams:
+  // closeLabel, width.
   export interface DrawerEntry { label: string; hash: string; current?: boolean; count?: number }
   export interface DrawerGroup { title?: string; entries: DrawerEntry[] }
-  // Local change from the kit: `list` replaces the generated entries, for a list
-  // that needs its own rows (labels with actions, per-row menus).
+  // `list` replaces the generated entries, for a list that needs its own rows
+  // (labels with actions, per-row menus).
   let { open = false, onclose, entries = [], groups, brand, list, footer, closeLabel = 'Close menu' }: {
     open?: boolean; onclose?: () => void; entries?: DrawerEntry[]; groups?: DrawerGroup[]
     brand?: Snippet; list?: Snippet; footer?: Snippet; closeLabel?: string
@@ -84,8 +86,8 @@
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.18);
     display: flex;
     flex-direction: column;
-    /* Local change: no bottom padding - the footer carries the safe area, so it
-       can match the brand band's height. */
+    /* No bottom padding: the footer carries the safe area, so it can match the
+       brand band's height. */
     padding: 0;
     /* Hidden off the start edge. transform isn't direction-aware, so branch
        on the document direction. */
@@ -171,7 +173,8 @@
     text-align: center;
   }
 
-  /* Local change: the same height as the brand band, so top and bottom match. */
+  /* The same height as the brand band (and the top bar), so the sidebar's top
+     and bottom edges balance. One row: the account button and icon buttons. */
   .footer {
     margin-top: auto;
     flex-shrink: 0;

@@ -1,4 +1,4 @@
-<!-- pwa-kit: shell/src/App.svelte v6 -->
+<!-- pwa-kit: shell/src/App.svelte v7 -->
 <script lang="ts">
   // Shell: login gate, top bar, one scrolling body, drawer, toasts. Views are
   // Angel's own (the one conversation, settings).
@@ -17,6 +17,7 @@
   import { angel, connectorLabel } from './lib/streamManager.svelte'
   import { router, parentOf } from './lib/router.svelte'
   import ResetButton from '$shared/ui/ResetButton.svelte'
+  import AccountMenu from '$shared/ui/AccountMenu.svelte'
   import { appearance } from './lib/appearance.svelte'
   import { setAccent, storedAccent } from './lib/accent'
 
@@ -53,22 +54,6 @@
   }
 
   const who = $derived(angel.user?.name || angel.user?.email || (angel.devSession ? 'Dev session' : ''))
-  const initial = $derived((who[0] || '?').toUpperCase())
-  // The account menu: opens up from the name in the sidebar footer.
-  let accountOpen = $state(false)
-  let accountEl = $state<HTMLElement>()
-  $effect(() => {
-    if (!accountOpen) return
-    const close = (e: Event) => {
-      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !accountEl?.contains(e.target as Node)) accountOpen = false
-    }
-    document.addEventListener('pointerdown', close)
-    document.addEventListener('keydown', close)
-    return () => {
-      document.removeEventListener('pointerdown', close)
-      document.removeEventListener('keydown', close)
-    }
-  })
 
   async function newSideChat() {
     menuOpen = false
@@ -217,23 +202,13 @@
 
     {#snippet footer()}
       <div class="account">
-        <div class="who-wrap" bind:this={accountEl}>
-          <button class="who" onclick={() => (accountOpen = !accountOpen)} aria-haspopup="menu" aria-expanded={accountOpen} tabindex={menuOpen ? 0 : -1}>
-            {#if angel.user?.picture}
-              <img class="avatar" src={angel.user.picture} alt="" referrerpolicy="no-referrer" />
-            {:else}
-              <span class="avatar initial" aria-hidden="true">{initial}</span>
-            {/if}
-            <span class="who-name">{who}</span>
-          </button>
-          {#if accountOpen}
-            <div class="account-menu" role="menu">
-              <button role="menuitem" onclick={() => { accountOpen = false; angel.signOut() }}>
-                <Icon name="logout" size={18} /> Sign out
-              </button>
-            </div>
-          {/if}
-        </div>
+        <AccountMenu name={who} picture={angel.user?.picture || null} tabindex={menuOpen ? 0 : -1}>
+          {#snippet menu(close)}
+            <button role="menuitem" onclick={() => { close(); angel.signOut() }}>
+              <Icon name="logout" size={18} /> Sign out
+            </button>
+          {/snippet}
+        </AccountMenu>
         <ResetButton tabindex={menuOpen ? 0 : -1} />
         <button class="icon-btn" onclick={() => appearance.toggle()} aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'} title={dark ? 'Light mode' : 'Dark mode'} tabindex={menuOpen ? 0 : -1}>
           <Icon name={dark ? 'light_mode' : 'dark_mode'} size={20} />
@@ -403,32 +378,6 @@
     align-items: center;
     gap: 4px;
   }
-  .who-wrap { position: relative; flex: 1; min-width: 0; }
-  .who {
-    display: flex; align-items: center; gap: 10px;
-    max-width: 100%; padding: 4px 8px 4px 4px; margin-left: -4px;
-    border: none; border-radius: var(--radius); background: none;
-    color: var(--text-primary); font: inherit; cursor: pointer; text-align: left;
-  }
-  .who:hover, .who[aria-expanded='true'] { background: var(--bg-hover); }
-  .avatar { width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; object-fit: cover; }
-  .avatar.initial {
-    display: grid; place-items: center;
-    background: var(--accent-deep); color: #fff; font-size: 0.85rem; font-weight: 500;
-  }
-  .who-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
-  .account-menu {
-    position: absolute; bottom: calc(100% + 6px); left: -4px; z-index: 10;
-    min-width: 160px; padding: 4px;
-    border: 1px solid var(--border); border-radius: var(--radius);
-    background: var(--bg-raised); box-shadow: var(--shadow);
-  }
-  .account-menu button {
-    display: flex; align-items: center; gap: 10px; width: 100%;
-    padding: 8px 10px; border: none; border-radius: 6px; background: none;
-    color: var(--text-primary); font: inherit; font-size: 0.85rem; cursor: pointer; text-align: left;
-  }
-  .account-menu button:hover { background: var(--bg-hover); }
   .icon-btn {
     width: 36px;
     height: 36px;
