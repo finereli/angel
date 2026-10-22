@@ -84,7 +84,9 @@
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.18);
     display: flex;
     flex-direction: column;
-    padding: 0 0 calc(var(--safe-bottom) + 22px);
+    /* Local change: no bottom padding - the footer carries the safe area, so it
+       can match the brand band's height. */
+    padding: 0;
     /* Hidden off the start edge. transform isn't direction-aware, so branch
        on the document direction. */
     transform: translateX(-100%);
